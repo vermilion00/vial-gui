@@ -512,6 +512,7 @@ class KeyboardWidget(QWidget):
                 self.clicked.emit()
                 return
 
+    #TODO: If this is called, it will always deselect all keys currently. Need to make my own version of this function
     def deselect(self):
         if self.active_key is not None:
             self.active_key = None

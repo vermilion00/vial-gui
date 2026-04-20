@@ -67,6 +67,7 @@ def hid_send(dev, msg, retries=1):
     return data
 
 
+#TODO: The error I'm getting at startup comes from this function
 def is_rawhid(desc, quiet):
     if desc["usage_page"] != 0xFF60 or desc["usage"] != 0x61:
         if not quiet:

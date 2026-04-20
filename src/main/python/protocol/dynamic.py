@@ -31,6 +31,7 @@ class ProtocolDynamic(BaseProtocol):
         for bit_index, feature in [
             (0, "caps_word"),
             (1, "layer_lock"),
+            (2, "analog_matrix")
             # Add more feature bits as needed...
         ]:
             if data[-1] & (1 << bit_index):

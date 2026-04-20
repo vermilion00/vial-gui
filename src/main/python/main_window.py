@@ -31,6 +31,7 @@ from unlocker import Unlocker
 from util import tr, EXAMPLE_KEYBOARDS, KeycodeDisplay, EXAMPLE_KEYBOARD_PREFIX
 from vial_device import VialKeyboard
 from editor.matrix_test import MatrixTest
+# from editor.am_window import KeymapEditor
 
 import themes
 
@@ -85,12 +86,18 @@ class MainWindow(QMainWindow):
         self.qmk_settings = QmkSettings()
         self.matrix_tester = MatrixTest(self.layout_editor)
         self.rgb_configurator = RGBConfigurator()
+        #TODO: Add my editor window here
+        self.am_configurator = KeymapEditor(self.layout_editor)
+        #self.analog_matrix_configurator = AnalogMatrixConfigurator()
 
         self.editors = [(self.keymap_editor, "Keymap"), (self.layout_editor, "Layout"), (self.macro_recorder, "Macros"),
                         (self.rgb_configurator, "Lighting"), (self.tap_dance, "Tap Dance"), (self.combos, "Combos"),
                         (self.key_override, "Key Overrides"), (self.alt_repeat_key, "Alt Repeat Key"),
                         (self.qmk_settings, "QMK Settings"), (self.matrix_tester, "Matrix tester"),
-                        (self.firmware_flasher, "Firmware updater")]
+                        (self.firmware_flasher, "Firmware updater"),
+                        (self.am_configurator, "Analog Matrix")
+                        # (self.analog_matrix_configurator, "Analog Matrix")
+                        ]
 
         Unlocker.global_layout_editor = self.layout_editor
         Unlocker.global_main_window = self
@@ -167,6 +174,8 @@ class MainWindow(QMainWindow):
 
         load_dummy_act = QAction(tr("MenuFile", "Load dummy JSON..."), self)
         load_dummy_act.triggered.connect(self.on_load_dummy)
+
+        #TODO: Add am config saving/loading here
 
         exit_act = QAction(tr("MenuFile", "Exit"), self)
         exit_act.setShortcut("Ctrl+Q")
@@ -336,9 +345,10 @@ class MainWindow(QMainWindow):
             Unlocker.unlock(self.autorefresh.current_device.keyboard)
             self.autorefresh.current_device.keyboard.reload()
 
+        #TODO: add analog matrix here
         for e in [self.layout_editor, self.keymap_editor, self.firmware_flasher, self.macro_recorder,
                   self.tap_dance, self.combos, self.key_override, self.alt_repeat_key,
-                  self.qmk_settings, self.matrix_tester, self.rgb_configurator]:
+                  self.qmk_settings, self.matrix_tester, self.rgb_configurator, self.am_configurator]:
             e.rebuild(self.autorefresh.current_device)
 
     def refresh_tabs(self):
@@ -460,6 +470,11 @@ class MainWindow(QMainWindow):
         self.about_dialog.show()
 
     def closeEvent(self, e):
+        #TODO: Is this called when the window is closed, or is this something else?
+        #      If 1, then I could send the save to eeprom command from here if am is enabled
+        # print("\nTest\n")
+        #This is indeed called when the window is closed, so why not?
+        
         self.settings.setValue("size", self.size())
         self.settings.setValue("pos", self.pos())
         self.settings.setValue("maximized", self.isMaximized())

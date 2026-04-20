@@ -57,6 +57,12 @@ class AboutKeyboard(QDialog):
         if feature_name in self.keyboard.supported_features:
             return "yes"
         return self.want_min_vial_fw(VIAL_PROTOCOL_DYNAMIC)
+    
+    #TODO: Add analog matrix here
+    # def about_analog_matrix(self):
+    #     if self.keyboard.analog_matrix_enabled: return "yes"
+    #     return "Not enabled"
+
 
     def __init__(self, device):
         super().__init__()
@@ -95,6 +101,9 @@ class AboutKeyboard(QDialog):
         text += "Alt Repeat Key entries: {}\n".format(self.about_alt_repeat_key())
         text += "Caps Word: {}\n".format(self.about_feature("caps_word"))
         text += "Layer Lock: {}\n".format(self.about_feature("layer_lock"))
+        #TODO: Add analog matrix here
+        text += "Analog Matrix: {}\n".format(self.about_feature("analog_matrix"))
+        # text += "Analog Matrix: {}\n".format(self.about_analog_matrix())
         text += "\n"
 
         text += "QMK Settings: {}\n".format(self.about_qmk_settings())
