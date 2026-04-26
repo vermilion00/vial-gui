@@ -359,6 +359,8 @@ class KeyboardWidget(QWidget):
         self.update()
         self.updateGeometry()
 
+    #NOTE: Gets called 2x when switching to keymap, 0x when switching to macros, 8x when switching to tap-dance, 10x to combos, 4x to overrides, 4x to alt-repeat, 
+    # 0x to qmk settings, 4x to matrix tester, 2x to actuation
     def paintEvent(self, event):
         qp = QPainter()
         qp.begin(self)
@@ -512,7 +514,7 @@ class KeyboardWidget(QWidget):
                 self.clicked.emit()
                 return
 
-    #TODO: If this is called, it will always deselect all keys currently. Need to make my own version of this function
+    #TODO: If this is called, it will always deselect all keys currently. Need to make my own version of this method
     def deselect(self):
         if self.active_key is not None:
             self.active_key = None

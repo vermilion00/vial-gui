@@ -793,6 +793,47 @@ KEYCODES_MIDI_ADVANCED = [
     K("MI_BENDU", "ᴹᴵᴰᴵ\nBendᵁᴾ", "Midi bend pitch up"),
 ]
 
+#MARK: AM keycodes
+#TODO: Is it possible that these are generated via the json?
+KEYCODES_ANALOG_MATRIX = []
+
+KEYCODES_ANALOG_MATRIX_BASE = [
+    K("AP(0)", "AP(0)", "Activate Profile 0"),
+    K("AP(1)", "AP(1)", "Activate Profile 1"),
+    K("AP(2)", "AP(2)", "Activate Profile 2"),
+    K("AP(3)", "AP(3)", "Activate Profile 3"),
+    K("AP(4)", "AP(4)", "Activate Profile 4"),
+    K("AP(5)", "AP(5)", "Activate Profile 5"),
+    K("AP(6)", "AP(6)", "Activate Profile 6"),
+    K("AP(7)", "AP(7)", "Activate Profile 7"),
+    K("AP(8)", "AP(8)", "Activate Profile 8"),
+    K("AP(9)", "AP(9)", "Activate Profile 9"),
+    K("AP(10)", "AP(10)", "Activate Profile 10"),
+    K("AP(11)", "AP(11)", "Activate Profile 11"),
+    K("AP(12)", "AP(12)", "Activate Profile 12"),
+    K("AP(13)", "AP(13)", "Activate Profile 13"),
+    K("AP(14)", "AP(14)", "Activate Profile 14"),
+    K("AP(15)", "AP(15)", "Activate Profile 15"),
+
+    K("AM_CLBR", "Start\nCalibration", "Calibrate switches"),
+    K("AM_CLTP", "Top DZ\nCalibration", "Calibrate top deadzones"),
+    K("AM_PRNT", "AM_PRNT", "Print calibration values"),
+    K("AM_LOCK", "Lock\nProfile", "Lock the profile from changing via layer switching"),
+    K("AM_TGPR", "Toggle\nPriority", "Toggle the priority status of the current profile"),
+    K("AM_CLCL", "Clear\nCalibration", "Clears the calibration values"),
+
+    K("AM_INPR", "Profile\n+", "Increment profile", alias=["AM_PRPL"]),
+    K("AM_DEPR", "Profile\n-", "Decrement profile", alias=["AM_PRMN"]),
+
+    # K("", "", ""),
+]
+
+KEYCODES_ANALOG_JOYSTICK = []
+
+KEYCODES_ANALOG_JOYSTICK_BASE = [
+
+]
+
 KEYCODES_HIDDEN = []
 for x in range(256):
     KEYCODES_HIDDEN.append(K("TD({})".format(x), "TD({})".format(x)))
@@ -810,7 +851,7 @@ def recreate_keycodes():
     KEYCODES.clear()
     KEYCODES.extend(KEYCODES_SPECIAL + KEYCODES_BASIC + KEYCODES_SHIFTED + KEYCODES_ISO + KEYCODES_LAYERS +
                     KEYCODES_BOOT + KEYCODES_MODIFIERS + KEYCODES_QUANTUM + KEYCODES_BACKLIGHT + KEYCODES_MEDIA +
-                    KEYCODES_TAP_DANCE + KEYCODES_MACRO + KEYCODES_USER + KEYCODES_HIDDEN + KEYCODES_MIDI)
+                    KEYCODES_TAP_DANCE + KEYCODES_MACRO + KEYCODES_USER + KEYCODES_HIDDEN + KEYCODES_MIDI + KEYCODES_ANALOG_MATRIX)
     KEYCODES_MAP.clear()
     RAWCODES_MAP.clear()
     for keycode in KEYCODES:
@@ -851,6 +892,23 @@ def create_midi_keycodes(midiSettingLevel):
 
     if midiSettingLevel == "advanced":
         KEYCODES_MIDI.extend(KEYCODES_MIDI_ADVANCED)
+
+
+#TODO: Extend this
+def create_analog_matrix_keycodes(keyboard):
+    return
+    KEYCODES_ANALOG_MATRIX.clear()
+    KEYCODES_ANALOG_JOYSTICK.clear()
+
+    if keyboard == None or not keyboard.am_enabled: return
+
+    #TODO: Do I want this to be profiles or max_profiles?
+    profile_num = keyboard.max_profiles
+    #TODO: Find out what qmk_id is, how do I set that?
+    # Leave out AP() keycodes for profiles that aren't enabled
+    KEYCODES_ANALOG_MATRIX.extend(KEYCODES_ANALOG_MATRIX_BASE[:profile_num])
+    KEYCODES_ANALOG_MATRIX.extend(KEYCODES_ANALOG_MATRIX[16:])
+    pass
 
 
 def recreate_keyboard_keycodes(keyboard):
@@ -922,6 +980,8 @@ def recreate_keyboard_keycodes(keyboard):
         create_user_keycodes()
 
     create_midi_keycodes(keyboard.midi)
+
+    create_analog_matrix_keycodes(keyboard)
 
     recreate_keycodes()
 

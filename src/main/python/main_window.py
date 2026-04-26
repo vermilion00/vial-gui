@@ -31,7 +31,7 @@ from unlocker import Unlocker
 from util import tr, EXAMPLE_KEYBOARDS, KeycodeDisplay, EXAMPLE_KEYBOARD_PREFIX
 from vial_device import VialKeyboard
 from editor.matrix_test import MatrixTest
-# from editor.am_window import KeymapEditor
+from editor.am_window import AnalogMatrixEditor
 
 import themes
 
@@ -86,17 +86,17 @@ class MainWindow(QMainWindow):
         self.qmk_settings = QmkSettings()
         self.matrix_tester = MatrixTest(self.layout_editor)
         self.rgb_configurator = RGBConfigurator()
-        #TODO: Add my editor window here
-        self.am_configurator = KeymapEditor(self.layout_editor)
-        #self.analog_matrix_configurator = AnalogMatrixConfigurator()
+        #TODO: Add my editor window here, only if analog matrix is enabled on the keyboard
+        self.am_configurator = AnalogMatrixEditor(self.layout_editor)
+        # self.am_settings = AnalogMatrixSettings(self)
 
         self.editors = [(self.keymap_editor, "Keymap"), (self.layout_editor, "Layout"), (self.macro_recorder, "Macros"),
                         (self.rgb_configurator, "Lighting"), (self.tap_dance, "Tap Dance"), (self.combos, "Combos"),
                         (self.key_override, "Key Overrides"), (self.alt_repeat_key, "Alt Repeat Key"),
                         (self.qmk_settings, "QMK Settings"), (self.matrix_tester, "Matrix tester"),
                         (self.firmware_flasher, "Firmware updater"),
-                        (self.am_configurator, "Analog Matrix")
-                        # (self.analog_matrix_configurator, "Analog Matrix")
+                        (self.am_configurator, "Actuation"),
+                        # (self.am_settings, "Analog Matrix settings")
                         ]
 
         Unlocker.global_layout_editor = self.layout_editor
@@ -175,8 +175,6 @@ class MainWindow(QMainWindow):
         load_dummy_act = QAction(tr("MenuFile", "Load dummy JSON..."), self)
         load_dummy_act.triggered.connect(self.on_load_dummy)
 
-        #TODO: Add am config saving/loading here
-
         exit_act = QAction(tr("MenuFile", "Exit"), self)
         exit_act.setShortcut("Ctrl+Q")
         exit_act.triggered.connect(self.close)
@@ -192,6 +190,22 @@ class MainWindow(QMainWindow):
             file_menu.addAction(load_dummy_act)
             file_menu.addSeparator()
             file_menu.addAction(exit_act)
+
+        #TODO: Add am config saving/loading here
+        #TODO: How do I only show these when enabled?
+        #MARK: AM menu actions
+        #TODO: Instead of adding them to the top bar, add this to the analog matrix settings tab?
+        analog_matrix_load_act = QAction(tr("Menu Analog Matrix", "Load analog matrix config..."), self)
+        analog_matrix_load_act.setShortcut("Ctrl+Shift+O")
+        analog_matrix_load_act.triggered.connect(self.on_analog_matrix_config_load)
+
+        analog_matrix_save_act = QAction(tr("Menu Analog Matrix", "Save analog matrix config..."), self)
+        analog_matrix_save_act.setShortcut("Ctrl+Shift+S")
+        analog_matrix_save_act.triggered.connect(self.on_analog_matrix_config_save)
+
+        self.analog_matrix_menu = self.menuBar().addMenu(tr("Menu", "Analog Matrix"))
+        self.analog_matrix_menu.addAction(analog_matrix_load_act)
+        self.analog_matrix_menu.addAction(analog_matrix_save_act)
 
         keyboard_unlock_act = QAction(tr("MenuSecurity", "Unlock"), self)
         keyboard_unlock_act.setShortcut("Ctrl+U")
@@ -291,6 +305,48 @@ class MainWindow(QMainWindow):
                 with open(dialog.selectedFiles()[0], "wb") as outf:
                     outf.write(self.keymap_editor.save_layout())
 
+    #MARK: AM Menu actions
+    #TODO: This doesn't fix the issue when closing the GUI without an AM keyboard connected
+    def get_analog_matrix_state(self):
+        if isinstance(self.autorefresh.current_device, VialKeyboard):
+            if self.autorefresh.current_device.keyboard == None: return False
+            return self.autorefresh.current_device.keyboard.am_enabled
+        else: return False
+
+    def on_analog_matrix_config_load(self):
+        if sys.platform == "emscripten":
+            import vialglue
+            # Tells the JS bridge to open a file selection dialog
+            # so the user can load a layout.
+            vialglue.load_layout()
+        else:
+            dialog = QFileDialog()
+            dialog.setDefaultSuffix("vil")
+            dialog.setAcceptMode(QFileDialog.AcceptOpen)
+            dialog.setNameFilters(["Vial layout (*.vil)"])
+            if dialog.exec_() == QDialog.Accepted:
+                with open(dialog.selectedFiles()[0], "rb") as inf:
+                    data = inf.read()
+                self.am_configurator.restore_layout(data)
+                self.rebuild()
+                
+    def on_analog_matrix_config_save(self):
+        if sys.platform == "emscripten":
+            import vialglue
+            layout = self.keymap_editor.save_layout()
+            # Passes the current layout to the JS bridge so it can
+            # open a file dialog and allow the user to save it to disk.
+            vialglue.save_layout(layout)
+        else:
+            dialog = QFileDialog()
+            dialog.setDefaultSuffix("vil")
+            dialog.setAcceptMode(QFileDialog.AcceptSave)
+            dialog.setNameFilters(["Vial layout (*.vil)"])
+            if dialog.exec_() == QDialog.Accepted:
+                with open(dialog.selectedFiles()[0], "wb") as outf:
+                    outf.write(self.am_configurator.save_layout())
+
+
     def on_click_refresh(self):
         self.autorefresh.update(quiet=False, hard=True)
 
@@ -338,18 +394,22 @@ class MainWindow(QMainWindow):
         self.about_keyboard_act.setVisible(False)
         if isinstance(self.autorefresh.current_device, VialKeyboard):
             self.about_keyboard_act.setText("About {}...".format(self.autorefresh.current_device.title()))
-            self.about_keyboard_act.setVisible(True)
+            self.about_keyboard_act.setVisible(True) 
 
         # if unlock process was interrupted, we must finish it first
         if isinstance(self.autorefresh.current_device, VialKeyboard) and self.autorefresh.current_device.keyboard.get_unlock_in_progress():
             Unlocker.unlock(self.autorefresh.current_device.keyboard)
             self.autorefresh.current_device.keyboard.reload()
 
-        #TODO: add analog matrix here
+        #NOTE: Any editor tab needs to be added here
         for e in [self.layout_editor, self.keymap_editor, self.firmware_flasher, self.macro_recorder,
                   self.tap_dance, self.combos, self.key_override, self.alt_repeat_key,
                   self.qmk_settings, self.matrix_tester, self.rgb_configurator, self.am_configurator]:
+            #TODO: This is the point where am_enabled is set
             e.rebuild(self.autorefresh.current_device)
+
+        # Add these options if analog matrix is enabled
+        self.analog_matrix_menu.menuAction().setVisible(self.get_analog_matrix_state())
 
     def refresh_tabs(self):
         self.tabs.clear()
@@ -470,10 +530,10 @@ class MainWindow(QMainWindow):
         self.about_dialog.show()
 
     def closeEvent(self, e):
-        #TODO: Is this called when the window is closed, or is this something else?
-        #      If 1, then I could send the save to eeprom command from here if am is enabled
-        # print("\nTest\n")
-        #This is indeed called when the window is closed, so why not?
+        #NOTE: This is indeed called when the window is closed, so why not?
+        if self.get_analog_matrix_state():
+            self.autorefresh.current_device.keyboard.get_switch_value(255)
+            print("Closed")
         
         self.settings.setValue("size", self.size())
         self.settings.setValue("pos", self.pos())

@@ -32,6 +32,13 @@ LOW_RES_MULT = 50
 HIGH_RES_MULT = 1000
 MULT_MULT = 100
 
+SWITCH_PRESS_HEIGHT = 0
+SWITCH_RELEASE_HEIGHT = 1
+SWITCH_PRESS_DISTANCE = 2
+SWITCH_RELEASE_DISTANCE = 3
+SWITCH_MODE = 4
+SWITCH_PRIORITY = 5
+
 HEIGHT_TO_INDEX = {
     'trigger_height': 0,
     'release_height': 1,
@@ -66,6 +73,7 @@ class ProtocolAnalogMatrix(BaseProtocol):
         self.priority_status = []
         self.profile_layers = []
         self.profile_switch_mode = 0
+        self.index = 255
         self.am_profile = 0
         self.profiles = 0
         self.max_profiles = 0
@@ -73,15 +81,15 @@ class ProtocolAnalogMatrix(BaseProtocol):
         self.matrix_to_num = []
         self.num_to_matrix = []
         self.am_height_mult = LOW_RES_MULT
+        self.switch_value = 0
 
     #MARK: Get def
     # Get the size of the configuration struct and the state of all features
     def get_keyboard_def(self):
-        request_data = struct.pack("BBB", AM_PREFIX, AM_GET_KEYBOARD_DEF, AM_GET_DEF)
-        data = self.usb_send(self.dev, request_data, retries=20)
+        data = self.usb_send(self.dev, struct.pack("BBB", AM_PREFIX, AM_GET_KEYBOARD_DEF, AM_GET_DEF), retries=20)
 
-        # If the data hasn't been changed, it means analog matrix isn't enabled on the keyboard
-        if data == request_data:
+        # If the first byte has changed, it means the command wasn't handled
+        if data[0] != AM_PREFIX:
             return False
 
         self.am_def_size = data[2] | (data[3] << 8)
@@ -100,6 +108,7 @@ class ProtocolAnalogMatrix(BaseProtocol):
             'mixed_matrix': True if data[5] & (1 << 2) else False,
             'filter_enable': True if data[5] & (1 << 3) else False,
             'invert_adc': True if data[5] & (1 << 4) else False,
+            'distance_from_bottom': True if data[5] & (1 << 5) else False,
             'joystick': True if data[6] & 1 else False,
             'midi': True if data[6] & (1 << 1) else False,
             'split_keyboard': True if data[6] & (1 << 2) else False,
@@ -118,15 +127,13 @@ class ProtocolAnalogMatrix(BaseProtocol):
             'slave_filter_strength': 0,
             'matrix_rows': data[14],
             'matrix_cols': data[15],
-            'switch_range': (data[16] | data[17] << 8) / 100,
+            'travel_distance': (data[16] | data[17] << 8) / 100,
         }
 
         self.profiles = data[9] & 0b00001111
         self.max_profiles = data[8]
         self.am_profile = data[18] # Currently active profile I think?
         self.am_height_mult = HIGH_RES_MULT if self.am_config['use_high_resolution'] else LOW_RES_MULT
-        print(self.am_config)
-        print(self.am_def_size)
 
         return True
 
@@ -278,17 +285,19 @@ class ProtocolAnalogMatrix(BaseProtocol):
 
 
     #MARK: Get switch value
-    def get_switch_value(self, row, col):
-        index = self.matrix_to_num[row][col]
+    def get_switch_value(self, index):
         data = self.usb_send(self.dev, struct.pack("<BBB", AM_PREFIX, AM_GET_SWITCH_VALUE, index), retries=20)
-        # The first uint16_t contains the travel range, the second contains the value - bottom_value
-        value = struct.unpack("<H", data[2:4])
+
+        if index == 255: return
+        value = struct.unpack("<H", data[2:4])[0]
         #TODO: This might need to be adjusted for INVERT_ADC configs
         #TODO: Does this work correctly with deadzones etc
-        if self.am_config['invert_adc']:
-            self.switch_value = ((value[1] - self.am_config['top_data']) / (self.am_config['top_data'] - self.am_config['bottom_data'])) * 100
+        if value == 0:
+            self.switch_value = 0
+        elif self.am_config['invert_adc']:
+            self.switch_value = ((value - self.am_config['top_data'][index]) / (self.am_config['bottom_data'][index] - self.am_config['top_data'][index])) * 100
         else:
-            self.switch_value = ((value[1] - self.am_config['bottom_data']) / (self.am_config['bottom_data'] - self.am_config['top_data'])) * 100
+            self.switch_value = ((self.am_config['top_data'][index] - value) / (self.am_config['top_data'][index] - self.am_config['bottom_data'][index])) * 100
 
 
     #TODO: I don't even need rc_matrix, since I can just look each position up in matrix_to_num and lowlight all keys that aren't in there
@@ -332,22 +341,20 @@ class ProtocolAnalogMatrix(BaseProtocol):
 
 
     #MARK: Set stuff
-    def set_switch_height(self, row, col, profile, height_type, value):
-        index = self.matrix_to_num[row][col]
+    def set_switch_height(self, index, profile, height_type, value):
         self.heights[height_type][profile][index] = value
+        #TODO: Add timeout buffer before sending the value, as the slider sends updates every tick when dragged
         value = int(value * self.am_height_mult)
         height_idx = HEIGHT_TO_INDEX[height_type]
         self.usb_send(self.dev, struct.pack('<BBBBBH', AM_PREFIX, AM_SET_SWITCH_HEIGHT, index, profile, height_idx, value), retries=20)
 
 
-    def set_switch_mode(self, row, col, profile, value):
-        index = self.matrix_to_num[row][col]
+    def set_switch_mode(self, index, profile, value):
         self.modes[profile][index] = value
         self.usb_send(self.dev, struct.pack('BBBBB', AM_PREFIX, AM_SET_SWITCH_MODE, index, profile, value), retries=20)
 
 
-    def set_switch_priority(self, row, col, profile, value):
-        index = self.matrix_to_num[row][col]
+    def set_switch_priority(self, index, profile, value):
         self.priority_status[profile][index] = value
         value = 1 if value else 0
         self.usb_send(self.dev, struct.pack('BBBBB', AM_PREFIX, AM_SET_SWITCH_PRIORITY, index, profile, value), retries=20)
@@ -419,23 +426,30 @@ class ProtocolAnalogMatrix(BaseProtocol):
 
     def send_reset_data(self):
         self.usb_send(self.dev, struct.pack('BB', AM_PREFIX, AM_RESET_KEYBOARD_DATA), retries=20)
+
+        #TODO: Reload the keyboard after clearing
         
 
     #MARK: Reload config
     def reload_analog_matrix(self):
         self.am_enabled = self.get_keyboard_def()
+        self.index = 255
 
         if self.am_enabled:
             self.get_keyboard_data()
             self.get_transformation_matrices()
             self.get_calibration_data()
-            
-            # self.set_switch_height(0, 1, 0, 'rt_press', 2.5)
-            # self.set_switch_height(6, 0, 0, 'rt_press', 2.5)
+
+            # self.send_reset_data()
+
+            # self.set_switch_height(1, 0, 'rt_press', 2.5)
+            # self.set_switch_height(31, 0, 'rt_press', 2.5)
+
             # print(self.am_config['top_data'])
             # print(self.am_config['bottom_data'])
 
 
+    #TODO: Implement this later
     #MARK: Save/restore
     # Returns the entire serialized analog matrix config as a list
     def save_analog_matrix(self):
@@ -446,10 +460,13 @@ class ProtocolAnalogMatrix(BaseProtocol):
         Priority profiles and keys, also priority save status
         Profile layers and profile switch mode
         '''
-        return []
+        config = b''
+        # for height_type in ['trigger_height', 'release_height', 'rt_press', 'rt_release']:
+        #     config self.am_config
+        return config
 
 
     # Converts the serialized list into the analog matrix config
-    def restore_analog_matrix(self):
+    def restore_analog_matrix(self, data):
         pass
 

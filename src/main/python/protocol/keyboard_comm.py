@@ -87,6 +87,8 @@ class Keyboard(ProtocolMacro, ProtocolDynamic, ProtocolTapDance, ProtocolCombo, 
         self.reload_settings()
 
         self.reload_dynamic()
+        
+        self.reload_analog_matrix()
 
         # based on the number of macros, tapdance, etc, this will generate global keycode arrays
         recreate_keyboard_keycodes(self)
@@ -98,8 +100,6 @@ class Keyboard(ProtocolMacro, ProtocolDynamic, ProtocolTapDance, ProtocolCombo, 
         self.reload_combo()
         self.reload_key_override()
         self.reload_alt_repeat_key()
-        #TODO: Add am stuff
-        self.reload_analog_matrix()
         
 
     def reload_layers(self):
