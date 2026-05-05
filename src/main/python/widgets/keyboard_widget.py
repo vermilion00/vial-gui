@@ -337,6 +337,7 @@ class KeyboardWidget(QWidget):
             widget.update_position(widget.scale, widget.shift_x - top_x + self.padding,
                                    widget.shift_y - top_y + self.padding)
 
+    #TODO: This sets the bounds of the keyboard widget, if I want to extend it past the necessary bounds for the selection box, I need to hook into this function
     def update_layout(self):
         """ Updates self.widgets for the currently active layout """
 
@@ -347,6 +348,7 @@ class KeyboardWidget(QWidget):
         self.widgets.sort(key=lambda w: (w.y, w.x))
 
         # determine maximum width and height of container
+        #TODO: The current placement implementation works of the local bounds of the keyboard widget, so extending it means that the keys need appropriate padding
         max_w = max_h = 0
         for key in self.widgets:
             p = key.polygon.boundingRect().bottomRight()
@@ -359,8 +361,6 @@ class KeyboardWidget(QWidget):
         self.update()
         self.updateGeometry()
 
-    #NOTE: Gets called 2x when switching to keymap, 0x when switching to macros, 8x when switching to tap-dance, 10x to combos, 4x to overrides, 4x to alt-repeat, 
-    # 0x to qmk settings, 4x to matrix tester, 2x to actuation
     def paintEvent(self, event):
         qp = QPainter()
         qp.begin(self)

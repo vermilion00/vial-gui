@@ -31,7 +31,7 @@ from unlocker import Unlocker
 from util import tr, EXAMPLE_KEYBOARDS, KeycodeDisplay, EXAMPLE_KEYBOARD_PREFIX
 from vial_device import VialKeyboard
 from editor.matrix_test import MatrixTest
-from editor.am_window import AnalogMatrixEditor
+from editor.am_window import AnalogMatrixEditor, AnalogMatrixSettings
 
 import themes
 
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self.rgb_configurator = RGBConfigurator()
         #TODO: Add my editor window here, only if analog matrix is enabled on the keyboard
         self.am_configurator = AnalogMatrixEditor(self.layout_editor)
-        # self.am_settings = AnalogMatrixSettings(self)
+        self.am_settings = AnalogMatrixSettings()
 
         self.editors = [(self.keymap_editor, "Keymap"), (self.layout_editor, "Layout"), (self.macro_recorder, "Macros"),
                         (self.rgb_configurator, "Lighting"), (self.tap_dance, "Tap Dance"), (self.combos, "Combos"),
@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
                         (self.qmk_settings, "QMK Settings"), (self.matrix_tester, "Matrix tester"),
                         (self.firmware_flasher, "Firmware updater"),
                         (self.am_configurator, "Actuation"),
-                        # (self.am_settings, "Analog Matrix settings")
+                        (self.am_settings, "Analog Matrix settings")
                         ]
 
         Unlocker.global_layout_editor = self.layout_editor
@@ -306,7 +306,6 @@ class MainWindow(QMainWindow):
                     outf.write(self.keymap_editor.save_layout())
 
     #MARK: AM Menu actions
-    #TODO: This doesn't fix the issue when closing the GUI without an AM keyboard connected
     def get_analog_matrix_state(self):
         if isinstance(self.autorefresh.current_device, VialKeyboard):
             if self.autorefresh.current_device.keyboard == None: return False
@@ -404,7 +403,7 @@ class MainWindow(QMainWindow):
         #NOTE: Any editor tab needs to be added here
         for e in [self.layout_editor, self.keymap_editor, self.firmware_flasher, self.macro_recorder,
                   self.tap_dance, self.combos, self.key_override, self.alt_repeat_key,
-                  self.qmk_settings, self.matrix_tester, self.rgb_configurator, self.am_configurator]:
+                  self.qmk_settings, self.matrix_tester, self.rgb_configurator, self.am_configurator, self.am_settings]:
             #TODO: This is the point where am_enabled is set
             e.rebuild(self.autorefresh.current_device)
 
@@ -532,7 +531,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         #NOTE: This is indeed called when the window is closed, so why not?
         if self.get_analog_matrix_state():
-            self.autorefresh.current_device.keyboard.get_switch_value(255)
+            self.autorefresh.current_device.keyboard.get_switch_value(index=255)
             print("Closed")
         
         self.settings.setValue("size", self.size())
