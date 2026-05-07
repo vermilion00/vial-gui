@@ -91,12 +91,12 @@ class TabbedConfig(QScrollArea):
         self.tabbed_layouts.append(self.mode_group)
     
         # Actuation sliders/fields
-        invert_sliders = False if self.keyboard.am_config['distance_from_bottom'] else True
-        enable_sliders = False if self.index == 255 else True
+        enable_sliders = self.index != 255
+        invert_sliders = not self.keyboard.am_config['distance_from_bottom']
         slider_range = (0, self.keyboard.am_config['travel_distance'] * SLIDER_MULT)
         # Trigger/Release height slider
         self.move_heights_together = False
-        self.height_field = ActuationWidget('Fixed Height', invert_sliders, slider_range, enable_sliders)
+        self.height_field = ActuationWidget('Fixed Height', invert_sliders, slider_range, enable_sliders, keyboard.am_config['travel_distance'], keyboard.am_config['use_high_resolution'])
         self.layout.addLayout(self.height_field)
         self.height_field.press_slider.valueChanged.connect(lambda value: self.actuation_changed(SWITCH_PRESS_HEIGHT, value/SLIDER_MULT))
         self.height_field.release_slider.valueChanged.connect(lambda value: self.actuation_changed(SWITCH_RELEASE_HEIGHT, value/SLIDER_MULT))
@@ -105,7 +105,7 @@ class TabbedConfig(QScrollArea):
 
         # Press/Release distance slider
         self.move_distances_together = False
-        self.rt_field = ActuationWidget('Rapid Trigger', invert_sliders, slider_range, enable_sliders)
+        self.rt_field = ActuationWidget('Rapid Trigger', invert_sliders, slider_range, enable_sliders, keyboard.am_config['travel_distance'], keyboard.am_config['use_high_resolution'])
         self.layout.addLayout(self.rt_field)
         self.rt_field.press_slider.valueChanged.connect(lambda value: self.actuation_changed(SWITCH_PRESS_DISTANCE, value/SLIDER_MULT))
         self.rt_field.release_slider.valueChanged.connect(lambda value: self.actuation_changed(SWITCH_RELEASE_DISTANCE, value/SLIDER_MULT))
@@ -115,12 +115,13 @@ class TabbedConfig(QScrollArea):
         self.settings_layout = SwitchSettingsWidget(keyboard=keyboard, index=self.index, profile=self.keyboard.am_profile)
         self.settings_layout.setContentsMargins(10, 0, 10, 0)
         self.settings_layout.resetPrevious.connect(self._update_values)
+        self.settings_layout.resetDefault.connect(self._update_values)
         self.layout.addLayout(self.settings_layout)
         self.tabbed_layouts.append(self.settings_layout)
 
     # Helper function to update the displayed values
     def _update_values(self):
-        self.update_index(self.index)
+        self.update_index(self.index, self.index_list)
 
 
     #MARK: Update
@@ -139,7 +140,6 @@ class TabbedConfig(QScrollArea):
 
             # Set the currently used mode
             used_mode = self.keyboard.modes[self.keyboard.am_profile][index]
-            # for idx, _ in enumerate(self.mode_selection):
             for idx, mode in enumerate(("Trigger Height", "Rapid Trigger", "Continuous Rapid Trigger", "Constant Rapid Trigger")):
                 if self.keyboard.am_config[f'use_{mode.lower().replace(" ", "_")}']:
                     self.mode_selection[idx][0].setDisabled(False)
@@ -180,7 +180,7 @@ class TabbedConfig(QScrollArea):
 
         self.settings_layout.update_index(keyboard=self.keyboard, index=self.index, index_list=self.index_list, profile=self.keyboard.am_profile)
 
-    #TODO: Go through all of these and do in for loop
+
     def key_mode_changed(self):
         mode = self.mode_group.checkedId()
         for index in self.index_list:
@@ -269,13 +269,14 @@ class BetterLineEdit(QLineEdit):
 
 #MARK: Actuation
 class ActuationWidget(QVBoxLayout):
-    def __init__(self, label, invert=True, slider_range=(0, 100), enabled=True, switch_travel=4.0):
+    def __init__(self, label, invert=True, slider_range=(0, 100), enabled=True, switch_travel=4.0, high_resolution=False):
         super().__init__()
         self.contents = []
         self.switch_travel = switch_travel
         self.offset = 0.0
         self.sync = False
         self.label = label
+        self.high_resolution = high_resolution
         self.setContentsMargins(10, 0, 10, 0)
         actuation_label = QLabel(tr("AnalogMatrixEditor", label))
         self.addWidget(actuation_label)
@@ -285,8 +286,22 @@ class ActuationWidget(QVBoxLayout):
         self.press_slider = ActuationSlider(invert, slider_range, enabled)
         self.press_layout.addWidget(self.press_slider)
         entry_layout = QVBoxLayout()
+        self.buttons = []
+        for val in [0.5, 0.1, 0.01, -0.5, -0.1, -0.01] if high_resolution else [0.5, 0.1, 0.02, -0.5, -0.1, -0.02]:
+            button = QPushButton(str(val))
+            button.clicked.connect(lambda _, t='press', v=val: self.incrementValue(t, v))
+            button.setEnabled(False)
+            self.buttons.append(button)
+        plus_buttons = QHBoxLayout()
+        for button in self.buttons[:3]:
+            plus_buttons.addWidget(button)
+        entry_layout.addLayout(plus_buttons)
         press_label = QLabel(tr("AnalogMatrixEditor", "Press"))
         entry_layout.addWidget(press_label)
+        minus_buttons = QHBoxLayout()
+        for button in self.buttons[3:]:
+            minus_buttons.addWidget(button)
+        entry_layout.addLayout(minus_buttons)
         self.press_entry = BetterLineEdit()
         self.press_entry.editingFinished.connect(lambda: self.processText('press', self.press_entry.displayText()))
         self.press_entry.setMaxLength(4)
@@ -299,8 +314,21 @@ class ActuationWidget(QVBoxLayout):
         self.release_slider = ActuationSlider(invert, slider_range, enabled)
         self.release_layout.addWidget(self.release_slider)
         entry_layout = QVBoxLayout()
+        for val in [0.5, 0.1, 0.01, -0.5, -0.1, -0.01] if high_resolution else [0.5, 0.1, 0.02, -0.5, -0.1, -0.02]:
+            button = QPushButton(str(val))
+            button.clicked.connect(lambda _, t='release', v=val: self.incrementValue(t, v))
+            button.setEnabled(False)
+            self.buttons.append(button)
+        plus_buttons = QHBoxLayout()
+        for button in self.buttons[6:9]:
+            plus_buttons.addWidget(button)
+        entry_layout.addLayout(plus_buttons)
         release_label = QLabel(tr("AnalogMatrixEditor", "Release"))
         entry_layout.addWidget(release_label)
+        minus_buttons = QHBoxLayout()
+        for button in self.buttons[9:]:
+            minus_buttons.addWidget(button)
+        entry_layout.addLayout(minus_buttons)
         self.release_entry = BetterLineEdit()
         self.release_entry.editingFinished.connect(lambda: self.processText('release', self.release_entry.displayText()))
         self.release_entry.setMaxLength(4)
@@ -311,7 +339,6 @@ class ActuationWidget(QVBoxLayout):
         self.checkbox = QCheckBox('Sync values')
         self.checkbox.stateChanged.connect(self.toggleSync)
         self.addWidget(self.checkbox)
-        self.contents.append(self.checkbox)
         offset_label = QLabel(tr("AnalogMatrixEditor", "Offset"))
         self.offset_entry = BetterLineEdit()
         self.offset_entry.setText('0.00')
@@ -322,22 +349,35 @@ class ActuationWidget(QVBoxLayout):
         self.addWidget(offset_label)
         self.addWidget(self.offset_entry)
 
-        self.contents += [actuation_label, self.press_slider, self.press_entry, self.release_slider, self.release_entry, entry_layout, press_label, self.press_layout, release_label, self.release_layout, self.checkbox, offset_label, self.offset_entry]
+        self.contents += [actuation_label, self.press_slider, self.press_entry, self.release_slider, self.release_entry, entry_layout, press_label, self.press_layout, release_label, self.release_layout, self.checkbox, offset_label, self.offset_entry, plus_buttons, minus_buttons, self.checkbox] + self.buttons
+
+
+    def incrementValue(self, height_type, amount):
+        if height_type == 'press':
+            value = float(self.press_entry.text()) + amount
+        elif height_type == 'release':
+            value = float(self.release_entry.text()) + amount
+
+        self.setValue(height_type, value)
 
 
     def setEnabled(self, state=None):
-        # If the slider states are synced, don't allow moving the release sliders
         if state != None:
             self.press_entry.setReadOnly(not state)
             self.press_entry.setEnabled(state)
             self.press_slider.setEnabled(state)
             self.offset_entry.setEnabled(state)
             self.offset_entry.setReadOnly(not state)
+            for button in self.buttons[:6]:
+                button.setEnabled(state)
 
+        # If the slider states are synced, don't allow moving the release sliders
         else: state = True
         self.release_entry.setReadOnly(self.sync or not state)
         self.release_entry.setDisabled(self.sync or not state)
         self.release_slider.setDisabled(self.sync or not state)
+        for button in self.buttons[6:]:
+            button.setDisabled(self.sync or not state)
         
 
     def processText(self, height_type, value):
@@ -381,11 +421,13 @@ class ActuationWidget(QVBoxLayout):
             content.deleteLater()
         self.contents = []
 
+
 # Contains the rest of the per switch settings
 # When init is called, we already have the keyboard data available
 #MARK: Settings
 class SwitchSettingsWidget(QVBoxLayout):
     resetPrevious = pyqtSignal()
+    resetDefault = pyqtSignal()
 
     def __init__(self, keyboard=None, index=255, profile=0):
         super().__init__()
@@ -393,19 +435,6 @@ class SwitchSettingsWidget(QVBoxLayout):
         self.config = []
         self.index = index
         self.profile = profile
-        # self.config['priority_status'] = False
-        #TODO: I need to loop through all selected indices and save their config to lists
-        #TODO: Is there any reason to assign the stuff here, instead of during an index update?
-        # if index < 255:
-            # if keyboard.am_config['use_trigger_height']:
-            #     self.config['trigger_height'] = keyboard.heights['trigger_height'][profile][index]
-            #     self.config['release_height'] = keyboard.heights['release_height'][profile][index]
-            # if keyboard.am_config['use_rt_distance']:
-            #     self.config['rt_press'] = keyboard.heights['rt_press'][profile][index]
-            #     self.config['rt_release'] = keyboard.heights['rt_release'][profile][index]
-            # self.config['mode'] = keyboard.modes[profile][index]
-            # if keyboard.am_config['priority_mode']:
-            #     self.config['priority_status'] = keyboard.priority_status[profile][index]
         self.contents = []
 
         label = QLabel(tr("AnalogMatrixEditor", "Switch settings"))
@@ -439,7 +468,6 @@ class SwitchSettingsWidget(QVBoxLayout):
         self.save_button.clicked.connect(self.keyboard.send_save_config)
         self.contents.append(self.save_button)
 
-    #TODO: The current implementation will only reset the last selected key, easy fix
     def update_index(self, keyboard, index, index_list, profile):
         self.keyboard = keyboard
         self.index = index
@@ -478,8 +506,7 @@ class SwitchSettingsWidget(QVBoxLayout):
             self.keyboard.set_switch_priority(index, self.profile, self.config[idx]['priority_status'])
 
 
-    # Reset the switch to the state it was in before
-    #TODO: Add a set_switch_profile function that adjusts the config in the GUI in bulk, then calls the HID transactions for the new config
+    # Reset the switch to the state it was in before being selected
     def reset_to_previous(self):
         profile = self.profile
         for idx, index in enumerate(self.index_list):
@@ -505,9 +532,30 @@ class SwitchSettingsWidget(QVBoxLayout):
 
     # Reset the switch to the default state
     def reset_to_default(self):
-        print("Currently doesn't do anything!")
-        #TODO: Same as the previous thing, except I'd need to add a transaction to get the json config as well
-        pass
+        profile = self.profile
+        PRESS_HEIGHT = 1.5 if not self.keyboard.am_config['distance_from_bottom'] else self.keyboard.am_config['travel_distance'] - 1.5
+        RELEASE_HEIGHT = 1.4 if not self.keyboard.am_config['distance_from_bottom'] else self.keyboard.am_config['travel_distance'] - 1.4
+        RT_DISTANCE = 0.5
+        MODE = 0
+        for index in self.index_list:
+            if self.keyboard.am_config['use_trigger_height']:
+                if self.keyboard.heights['trigger_height'][profile][index] != PRESS_HEIGHT:
+                    self.keyboard.set_switch_height(index, profile, 'trigger_height', PRESS_HEIGHT)
+                if self.keyboard.heights['release_height'][profile][index] != RELEASE_HEIGHT:
+                    self.keyboard.set_switch_height(index, profile, 'release_height', RELEASE_HEIGHT)
+            if self.keyboard.am_config['use_rt_distance']:
+                if self.keyboard.heights['rt_press'][profile][index] != RT_DISTANCE:
+                    self.keyboard.set_switch_height(index, profile, 'rt_press', RT_DISTANCE)
+                if self.keyboard.heights['rt_release'][profile][index] != RT_DISTANCE:
+                    self.keyboard.set_switch_height(index, profile, 'rt_release', RT_DISTANCE)
+
+            if self.keyboard.modes[profile][index] != MODE:
+                self.keyboard.set_switch_mode(index, profile, MODE)
+                
+            if self.keyboard.priority_status[profile][index] != False:
+                self.keyboard.set_switch_priority(index, profile, False)
+
+        self.resetDefault.emit()
     
     def destroy(self):
         for content in self.contents:

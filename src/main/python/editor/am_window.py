@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 import json
+from collections import defaultdict
 
-from PyQt5.QtCore import Qt, QSize, QRect, QPointF, pyqtSignal, QEvent, QRectF, QPoint
+from PyQt5.QtCore import Qt, QSize, QRect, QPointF, pyqtSignal, QEvent, QRectF, QPoint, QLine
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QTransform, QBrush, QPolygonF, QPalette
 from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QMessageBox, QWidget, QSpinBox,  QToolTip, QApplication, QRubberBand
 from themes import Theme
@@ -23,10 +24,14 @@ EXCLUSIVE_MODE = 1
 class ClickableWidget(QWidget):
 
     clicked = pyqtSignal()
+    # resized = pyqtSignal()
 
     def mousePressEvent(self, evt):
         super().mousePressEvent(evt)
         self.clicked.emit()
+
+    # def resizeEvent(self, ev):
+    #     self.resized.emit()
 
 
 class AnalogMatrixEditor(BasicEditor):
@@ -36,7 +41,6 @@ class AnalogMatrixEditor(BasicEditor):
         self.keyboard = None
 
         self.layout_editor = layout_editor
-        # self.layout_editor.addStretch()
 
         self.layout_profiles = QHBoxLayout()
         self.layout_size = QVBoxLayout()
@@ -57,15 +61,15 @@ class AnalogMatrixEditor(BasicEditor):
         self.container.deselected.connect(self.on_key_deselected)
 
         layout = QVBoxLayout()
-        #TODO: Even with the stretch, the layout doesn't extend past the keyboard widget
-        # layout.addStretch()
         layout.addLayout(layout_labels_container)
         layout.addWidget(self.container)
         layout.setAlignment(self.container, Qt.AlignHCenter)
+        
         #TODO: This is the background around the keyboard widget, that I need to replace/extend for the selection box
         w = ClickableWidget()
         w.setLayout(layout)
         w.clicked.connect(self.on_empty_space_clicked)
+        # w.resized.connect(self._resizeEvent)
         self.addWidget(w)
 
         self.profile_buttons = []
@@ -81,7 +85,7 @@ class AnalogMatrixEditor(BasicEditor):
 
         self.device = None
 
-    #TODO: Since I want to be able to drag a box from the empty space, I might need to hook into this
+
     def on_empty_space_clicked(self):
         self.container.deselect()
         self.container.update()
@@ -90,19 +94,25 @@ class AnalogMatrixEditor(BasicEditor):
         self.tabbed_config.update_index(255)
 
 
+    # def _resizeEvent(self):
+    #     width = self.geometry().width()
+    #     print(width)
+    #     if width > 0:
+    #         self.container.update_layout(width)
+
+
     #TODO: There's gotta be a better way to update the profile buttons than rebuilding this whole thing every press
     #TODO: The checked stuff etc doesn't work the first time around, probably because it's called too early? Call it again every time we open the tab I guess
     #      It is aware of the am_config though, and has the correct config pulled. Is it because those things can't apply when they're not rendered? Wouldn't really make sense
     def rebuild_profiles(self):
-        # Delete old layer labels
+        # Delete old profile stuff
         for label in self.profile_buttons:
             label.hide()
             label.deleteLater()
         self.profile_buttons = []
 
         # Create new profile buttons
-        #TODO: Remove the +5 when done testing
-        for x in range(self.keyboard.max_profiles + 5):
+        for x in range(self.keyboard.max_profiles):
             btn = SquareButton(str(x))
 
             btn.setFocusPolicy(Qt.NoFocus)
@@ -168,8 +178,8 @@ class AnalogMatrixEditor(BasicEditor):
             self.container.set_scale(self.container.get_scale() - 0.1)
         else:
             self.container.set_scale(self.container.get_scale() + 0.1)
-        # self.refresh_profile_display()
-        # self.rebuild_profiles()
+        self.rebuild_profiles()
+        self.refresh_profile_display()
 
     def rebuild(self, device):
         super().rebuild(device)
@@ -238,10 +248,6 @@ class AnalogMatrixEditor(BasicEditor):
 
     #TODO: Need to draw the keycodes after this is called, since the display layer is set too late currently
     def switch_profile(self, idx):
-        #TODO: What does this do? I think it just deselects all keys if the profile is switched
-        #      The keys are still switched off, something else probably does the same thing
-        # self.container.deselect()
-
         self.keyboard.am_profile = idx
         self.keyboard.set_active_profile(idx)
         
@@ -346,16 +352,20 @@ class AnalogMatrixSettings(BasicEditor):
         return isinstance(self.device, VialKeyboard) and self.device.keyboard and self.device.keyboard.am_enabled
 
 
-#TODO: Make this a thing
 class AMKeyboardWidget(KeyboardWidget):
     def __init__(self, layout_editor, keyboard):
         super().__init__(layout_editor)
         self.keyboard = keyboard
         self.active_key_list = []
         self.selected_list = []
-        self.rubberband = QRubberBand(QRubberBand.Rectangle, self)
         self.rubberband_origin = QPoint()
+        self.rubberband = QRubberBand(QRubberBand.Rectangle, self)
         self.selection_mode = BOX_SELECTION
+
+        #TODO: Instead of setting this to a fixed value, update this according to the bounds of the parent widget
+        #->Set the parent to be stretched, then set this value to the difference between the key center and the widget center / 2
+        self.widget_padding = 150
+        # self.parent_width = 0
 
 
     def set_keyboard(self, keyboard):
@@ -373,24 +383,16 @@ class AMKeyboardWidget(KeyboardWidget):
     def mousePressEvent(self, ev):
         if not self.enabled:
             return
-        
-        #TODO: How do I want to differentiate between presses and drags?
-        #      -I could make it so that drags only register when I start it in an empty space, would be the easiest but annoying
-        #      -I could make it so that the selection only triggers on release when no dragging is happening, also annoying
-        #      -The best option would be to select the key instantly but also allow for dragging simultaneously
-        #           -The selection is still evaluated when pressed
-        #           -If a drag is active, re-evaluate the selection every move update
-        #           -Deactivate the window in the release function
-        #           ->This option would mean that the deselect function is called in the release event, if the drag didn't select any keys
-        #               -Actually, do I want to be able to add keys to an existing selection with the drag, or should it just clear when started in empty space?
 
         #TODO: The rubberband currently only works inside the keyboard portion, the space around it isn't covered by it
         #       ->The easiest way around this is probably to just expand the keyboard widget in x direction to the edges
         if ev.button() == Qt.LeftButton:
             self.rubberband_origin = QPoint(ev.pos())
-            if self.selection_mode == BOX_SELECTION:
-                self.rubberband.show()
-                self.rubberband.setGeometry(QRect(self.rubberband_origin, QSize()))
+            self.rubberband.show()
+            # if self.selection_mode == BOX_SELECTION:
+            #TODO: Make a path selection tool working without drawing the rectangle
+            self.rubberband.setGeometry(QRect(self.rubberband_origin, QSize()))
+            # else:
 
         self.active_key, self.active_mask = self.hit_test(ev.pos())
         if self.active_key is not None:
@@ -436,19 +438,19 @@ class AMKeyboardWidget(KeyboardWidget):
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.LeftButton:
-            if self.active_key is None and self.selected_list == []:
+            if self.active_key is None and self.selected_list == [] and not (QApplication.keyboardModifiers() & Qt.ControlModifier):
                 self.deselected.emit()
                 self.active_key_list = []
 
             self.rubberband_origin.setX(0)
             self.rubberband_origin.setY(0)
             #NOTE: The selection doesn't update unless .show/hide is called on the rubberband for some reason
-            if self.selection_mode == BOX_SELECTION:
-                self.rubberband.hide()
-                for key in self.selected_list:
-                    if key not in self.active_key_list:
-                        self.active_key_list.append(key)
-                self.selected_list = []
+            # if self.selection_mode == BOX_SELECTION:
+            self.rubberband.hide()
+            for key in self.selected_list:
+                if key not in self.active_key_list:
+                    self.active_key_list.append(key)
+            self.selected_list = []
 
             # If keys are active but the active_key position is empty, set it to the last selected key
             if self.active_key is None and self.active_key_list != []:
@@ -458,27 +460,24 @@ class AMKeyboardWidget(KeyboardWidget):
             if self.active_key is not None:
                 self.clicked.emit()
 
-        # print(self.active_key_list)
-
 
     def mouseMoveEvent(self, ev):
         if not self.rubberband_origin.isNull():
             if self.selection_mode == BOX_SELECTION:
                 self.rubberband.setGeometry(QRect(self.rubberband_origin, ev.pos()).normalized())
 
-                #TODO: When dragging, the keys should only be added on release
-                # Top left corner is 0, 0
+                #NOTE: Top left corner is 0, 0
                 # # Check if we're using inclusive or exclusive mode
                 if ev.pos().x() < self.rubberband_origin.x():
                     mode = EXCLUSIVE_MODE
-                    left_x = ev.pos().x()
-                    right_x = self.rubberband_origin.x()
+                    left_x = ev.pos().x() / self.scale
+                    right_x = self.rubberband_origin.x() / self.scale
                 else:
                     mode = INCLUSIVE_MODE
-                    left_x = self.rubberband_origin.x()
-                    right_x = ev.pos().x()
-                top_y = min(self.rubberband_origin.y(), ev.pos().y())
-                bottom_y = max(self.rubberband_origin.y(), ev.pos().y())
+                    left_x = self.rubberband_origin.x() / self.scale
+                    right_x = ev.pos().x() / self.scale
+                top_y = min(self.rubberband_origin.y(), ev.pos().y()) / self.scale
+                bottom_y = max(self.rubberband_origin.y(), ev.pos().y()) / self.scale
 
                 self.selected_list = []
                 for key in self.widgets:
@@ -495,6 +494,7 @@ class AMKeyboardWidget(KeyboardWidget):
                         #      The active index is reset correctly, but the key remains highlighted -> likely a QP problem
                         # Deselect the initially pressed key, as it's not part of the selection in exclusive mode
                         if self.active_key is not None:
+                            # self.deselected.emit()
                             self.active_key.active = False
                             self.active_key = None
                             self.clicked.emit()
@@ -504,23 +504,100 @@ class AMKeyboardWidget(KeyboardWidget):
 
             #NOTE: This mode can be used to select keys by dragging over them instead of using a rectangle
             #       -> Add a button to toggle between them
+            #       Need to find a way to select the keys without needing to drag the rubberband though, it currently doesn't work without the show/hide methods
             else:
                 for key in self.widgets:
                     if key.polygon.containsPoint(ev.pos()/self.scale, Qt.OddEvenFill):
                         self.active_key_list.append(key)
-            
-            # print(self.active_key_list)
 
-            # Get all widgets inside the selection
-            #NOTE: I can get the top left corner coordinates via key.x and key.y, how do I get the size?
-            # for key in self.widgets:
-                
-            # Propagate the new selection to the child classes
+
+    # def Geometry(self, geometry):
+    #     # self.widget_padding = (geometry[0] - ) // 2
+    #     pass
+            
+
+    def place_widgets(self):
+        scale_factor = self.fontMetrics().height()
+
+        self.widgets = []
+
+        # place common widgets, that is, ones which are always displayed and require no extra transforms
+        for widget in self.common_widgets:
+            widget.update_position(scale_factor)
+            self.widgets.append(widget)
+
+        # top-left position for specific layout
+        layout_x = defaultdict(lambda: defaultdict(lambda: 1e6))
+        layout_y = defaultdict(lambda: defaultdict(lambda: 1e6))
+
+        # determine top-left position for every layout option
+        for widget in self.widgets_for_layout:
+            widget.update_position(scale_factor)
+            idx, opt = widget.desc.layout_index, widget.desc.layout_option
+            p = widget.polygon.boundingRect().topLeft()
+            layout_x[idx][opt] = min(layout_x[idx][opt], p.x())
+            layout_y[idx][opt] = min(layout_y[idx][opt], p.y())
+
+        # obtain widgets for all layout options now that we know how to shift them
+        for widget in self.widgets_for_layout:
+            idx, opt = widget.desc.layout_index, widget.desc.layout_option
+            if opt == self.layout_editor.get_choice(idx):
+                shift_x = layout_x[idx][opt] - layout_x[idx][0]
+                shift_y = layout_y[idx][opt] - layout_y[idx][0]
+                widget.update_position(scale_factor, -shift_x, -shift_y)
+                self.widgets.append(widget)
+
+        # at this point some widgets on left side might be cutoff, or there may be too much empty space
+        # calculate top left position of visible widgets and shift everything around
+        top_x = top_y = 1e6
+        for widget in self.widgets:
+            if not widget.desc.decal:
+                p = widget.polygon.boundingRect().topLeft()
+                top_x = min(top_x, p.x())
+                top_y = min(top_y, p.y())
+        for widget in self.widgets:
+            widget.update_position(widget.scale, widget.shift_x - top_x + self.padding + self.widget_padding,
+                                   widget.shift_y - top_y + self.padding)
+
+    #TODO: This sets the bounds of the keyboard widget, if I want to extend it past the necessary bounds for the selection box, I need to hook into this function
+    def update_layout(self, parent_width=None):
+        """ Updates self.widgets for the currently active layout """
+
+        #TODO: Instead of setting the width like this, set it to the parent width and update the widget_padding appropriately
+        # if parent_width is not None:
+        #     self.parent_width = parent_width
+        #     print(f"Width: {self.width}, parent_width: {parent_width}")
+
+        # determine widgets for current layout
+        self.place_widgets()
+        self.widgets = list(filter(lambda w: not w.desc.decal, self.widgets))
+
+        self.widgets.sort(key=lambda w: (w.y, w.x))
+
+        # determine maximum width and height of container
+        max_w = max_h = 0
+        for key in self.widgets:
+            p = key.polygon.boundingRect().bottomRight()
+            max_w = max(max_w, p.x() * self.scale)
+            max_h = max(max_h, p.y() * self.scale)
+
+        #TODO: This doesn't work properly, but might be usable
+        # if self.parent_width == 0:
+        #     self.width = round(max_w + 2 * self.padding + self.widget_padding)
+        # else:
+        #     self.width = self.parent_width
+        #     self.widget_padding = (self.width - max_w) // 2
+
+        self.width = round(max_w + 2 * self.padding + self.widget_padding)
+        self.height = round(max_h + 2 * self.padding)
+
+        self.update()
+        self.updateGeometry()
 
 
     #NOTE: The weird drawing behaviour almost makes me think that this draws on the highest active widget (the selection rectangle) instead of the keys specifically
+    # This is called by the widget itself, when it needs to update
     def paintEvent(self, event):
-
         qp = QPainter()
         qp.begin(self)
         qp.setRenderHint(QPainter.Antialiasing)
@@ -590,7 +667,7 @@ class AMKeyboardWidget(KeyboardWidget):
             #TODO: Update this to highlight all selected keys properly
             #      -While a selection box is used, only the part of the key that is inside it is highlighted correctly
             #       ->This is likely because the painter draws on the highest widget (or something), so only the parts inside the rectangle get updated
-            active = key.active or key in self.active_key_list or key in self.selected_list
+            active = key in self.active_key_list or key in self.selected_list
 
             # draw keycap background/drop-shadow
             qp.setPen(active_pen if active else Qt.NoPen)
@@ -606,13 +683,6 @@ class AMKeyboardWidget(KeyboardWidget):
             # draw keycap foreground
             qp.setPen(Qt.NoPen)
             brush = foreground_brush
-
-            if key.pressed:
-                brush = foreground_pressed_brush
-            elif key.on:
-                brush = foreground_on_brush
-            qp.setBrush(brush)
-            qp.drawPath(key.foreground_draw_path)
 
             #TODO: The current rc brush is kinda ugly, fiddle around with it some more
             row, col = key.desc.row, key.desc.col

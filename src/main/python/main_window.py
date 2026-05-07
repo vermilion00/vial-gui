@@ -86,7 +86,6 @@ class MainWindow(QMainWindow):
         self.qmk_settings = QmkSettings()
         self.matrix_tester = MatrixTest(self.layout_editor)
         self.rgb_configurator = RGBConfigurator()
-        #TODO: Add my editor window here, only if analog matrix is enabled on the keyboard
         self.am_configurator = AnalogMatrixEditor(self.layout_editor)
         self.am_settings = AnalogMatrixSettings()
 
@@ -96,7 +95,7 @@ class MainWindow(QMainWindow):
                         (self.qmk_settings, "QMK Settings"), (self.matrix_tester, "Matrix tester"),
                         (self.firmware_flasher, "Firmware updater"),
                         (self.am_configurator, "Actuation"),
-                        (self.am_settings, "Analog Matrix settings")
+                        (self.am_settings, "Analog Matrix")
                         ]
 
         Unlocker.global_layout_editor = self.layout_editor
