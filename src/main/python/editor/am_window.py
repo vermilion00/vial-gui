@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from PyQt5.QtCore import Qt, QSize, QRect, QPointF, pyqtSignal, QEvent, QRectF, QPoint, QLine
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QTransform, QBrush, QPolygonF, QPalette
-from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QMessageBox, QWidget, QSpinBox,  QToolTip, QApplication, QRubberBand
+from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QMessageBox, QWidget, QSpinBox,  QToolTip, QApplication, QRubberBand, QAction
 from themes import Theme
 
 from editor.basic_editor import BasicEditor
@@ -102,8 +102,6 @@ class AnalogMatrixEditor(BasicEditor):
 
 
     #TODO: There's gotta be a better way to update the profile buttons than rebuilding this whole thing every press
-    #TODO: The checked stuff etc doesn't work the first time around, probably because it's called too early? Call it again every time we open the tab I guess
-    #      It is aware of the am_config though, and has the correct config pulled. Is it because those things can't apply when they're not rendered? Wouldn't really make sense
     def rebuild_profiles(self):
         # Delete old profile stuff
         for label in self.profile_buttons:
@@ -120,9 +118,9 @@ class AnalogMatrixEditor(BasicEditor):
             if x < self.keyboard.profiles:
                 btn.setCheckable(True)
                 btn.clicked.connect(lambda state, idx=x: self.switch_profile(idx))
-            else: # Show buttons for deleted profiles, but apply a different style and disable them
+            else: # Show buttons for unused profiles, but apply a different style and disable them
                 btn.setDisabled(True)
-                btn.setCheckable(False)
+                # btn.setCheckable(False)
 
             # Auto-enable the button for the active profile
             if x == self.keyboard.am_profile:
@@ -131,8 +129,8 @@ class AnalogMatrixEditor(BasicEditor):
             self.layout_profiles.addWidget(btn)
             self.profile_buttons.append(btn)
 
-            # Get the config of the selected switch on the new profile
-            self.tabbed_config.update_index(self.index, self.index_list)
+        # Get the config of the selected switch on the new profile
+        self.tabbed_config.update_index(self.index, self.index_list)
 
         # Add buttons to add/delete profiles
         for x in ['+', '-']:
@@ -164,8 +162,7 @@ class AnalogMatrixEditor(BasicEditor):
             self.layout_layers.addWidget(btn)
             self.profile_buttons.append(btn)
 
-        #NOTE: This sets zoom buttons
-        for x in range(0,2):
+        for x in range(0, 2):
             btn = SquareButton("-") if x else SquareButton("+")
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setCheckable(False)
@@ -184,7 +181,6 @@ class AnalogMatrixEditor(BasicEditor):
     def rebuild(self, device):
         super().rebuild(device)
         if self.valid():
-            #NOTE: am_enabled is only set after this is called
             self.keyboard = device.keyboard
 
             self.container.set_keys(self.keyboard.keys, self.keyboard.encoders)
@@ -193,9 +189,9 @@ class AnalogMatrixEditor(BasicEditor):
             self.container.set_keyboard(self.keyboard)
 
             # Build the profile layout
+            self.refresh_profile_display()
             self.rebuild_profiles()
 
-            self.refresh_profile_display()
 
         self.container.setEnabled(self.valid())
 
@@ -264,6 +260,7 @@ class AnalogMatrixEditor(BasicEditor):
         if not assigned_layer:
             self.display_layer = 0
 
+        self.refresh_profile_display()
         self.rebuild_profiles()
 
     def add_profile(self):
@@ -367,11 +364,31 @@ class AMKeyboardWidget(KeyboardWidget):
         self.widget_padding = 150
         # self.parent_width = 0
 
+        self.select_all_action = QAction(self)
+        self.select_all_action.setShortcut("Ctrl+A")
+        self.select_all_action.triggered.connect(self.select_all)
+        self.addAction(self.select_all_action)
+        self.deselect_action = QAction(self)
+        self.deselect_action.setShortcut("Esc")
+        self.deselect_action.triggered.connect(self.deselect)
+        self.addAction(self.deselect_action)
+
 
     def set_keyboard(self, keyboard):
         self.keyboard = keyboard
 
+
+    def select_all(self):
+        self.active_key_list = []
+        for key in self.widgets:
+            self.active_key_list.append(key)
+
+        if self.active_key is None:
+            self.active_key = self.active_key_list[0]
+
+        self.clicked.emit()
     
+
     def deselect(self):
         if self.active_key is not None:
             self.active_key = None

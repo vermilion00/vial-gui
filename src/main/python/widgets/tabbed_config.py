@@ -475,6 +475,9 @@ class SwitchSettingsWidget(QVBoxLayout):
         self.profile = profile
         if index < 255:
             self.config = []
+            if keyboard.am_config['priority_mode']:
+                self.priority_checkbox.setEnabled(True)
+                
             for idx, index in enumerate(index_list):
                 self.config.append({})
                 if self.keyboard.am_config['use_trigger_height']:
@@ -490,7 +493,6 @@ class SwitchSettingsWidget(QVBoxLayout):
                 self.default_button.setEnabled(True)
                 if self.config[idx]['priority_status']:
                     self.priority_checkbox.setChecked(self.config[idx]['priority_status'])
-                    self.priority_checkbox.setEnabled(True)
         else:
             self.previous_button.setEnabled(False)
             self.default_button.setEnabled(False)
