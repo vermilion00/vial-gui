@@ -7,7 +7,6 @@ AM_PREFIX = 0xFD
 AM_GET_KEYBOARD_DEF = 0x00
 AM_GET_KEYBOARD_DATA = 0x01
 AM_GET_MATRIX_TO_NUM = 0x02
-# AM_GET_MIXED_MATRIX = 0x03
 AM_GET_SWITCH_VALUE = 0x03
 AM_SET_SWITCH_HEIGHT = 0x04
 AM_SET_SWITCH_MODE = 0x05
@@ -15,14 +14,15 @@ AM_SET_SWITCH_PRIORITY = 0x06
 AM_SET_PROFILE_LAYERS = 0x07
 AM_SET_PROFILE_CONFIG = 0x08
 AM_SET_PRIORITY_PROFILES = 0x09
-AM_SET_DYNAMIC_CALIBRATION = 0x0A
-AM_SET_DEADZONE = 0x0B
-AM_SET_SAVE_PROFILE_LOCK = 0x0C
-AM_SET_USED_PROFILES = 0x0D
-AM_SET_ACTIVE_PROFILE = 0x0E
-AM_SAVE_CONFIG = 0x0F
-AM_CLEAR_CALIBRATION_DATA = 0x10
-AM_RESET_KEYBOARD_DATA = 0x11
+AM_SET_PRIORITY_LEVEL = 0x0A
+AM_SET_DYNAMIC_CALIBRATION = 0x0B
+AM_SET_DEADZONE = 0x0C
+AM_SET_SAVE_PROFILE_LOCK = 0x0D
+AM_SET_USED_PROFILES = 0x0E
+AM_SET_ACTIVE_PROFILE = 0x0F
+AM_SAVE_CONFIG = 0x10
+AM_CLEAR_CALIBRATION_DATA = 0x11
+AM_RESET_KEYBOARD_DATA = 0x12
 # AM_GET_KEYBOARD_DEF subtransactions
 AM_GET_DEF = 0x00
 AM_GET_PROFILE = 0x01
@@ -63,13 +63,15 @@ DEADZONE_TO_INDEX = {
     'slave_filter': 7 # Not implemented
 }
 
-
+HIGHEST_QSID = 20
 class ProtocolAnalogMatrix(BaseProtocol):
     def __init__(self):
         self.am_enabled = False
         self.heights = {}
-        self.am_config = {}
         self.modes = []
+        self.am_config = {}
+        self.am_settings = {}
+        self.setting_values = [0 for _ in range(HIGHEST_QSID)]
         self.priority_status = []
         self.profile_layers = []
         self.profile_switch_mode = 0
@@ -105,8 +107,9 @@ class ProtocolAnalogMatrix(BaseProtocol):
             'use_constant_rapid_trigger': True if data[4] & (1 << 5) else False,
             'dynamic_calibration': True if data[5] & 1 else False,
             'priority_mode': True if data[5] & (1 << 1) else False,
+            'priority_indices': True if data[5] & (1 << 6) else False,
             'mixed_matrix': True if data[5] & (1 << 2) else False,
-            'filter_enable': True if data[5] & (1 << 3) else False,
+            'adjustable_filter_strength': True if data[5] & (1 << 3) else False,
             'invert_adc': True if data[5] & (1 << 4) else False,
             'distance_from_bottom': True if data[5] & (1 << 5) else False,
             'joystick': True if data[6] & 1 else False,
@@ -121,7 +124,6 @@ class ProtocolAnalogMatrix(BaseProtocol):
             'rc_switch_num': data[12],
             'layer_size': data[13], # Size of layer_state_t in bytes
             #TODO: Implement this
-            'adjustable_filter_strength': False,
             'filter_strength': 0,
             'right_filter_strength': 0,
             'slave_filter_strength': 0,
@@ -132,8 +134,47 @@ class ProtocolAnalogMatrix(BaseProtocol):
 
         self.profiles = data[9] & 0b00001111
         self.max_profiles = data[8]
-        self.am_profile = data[18] # Currently active profile I think?
+        self.am_profile = data[18]
         self.am_height_mult = HIGH_RES_MULT if self.am_config['use_high_resolution'] else LOW_RES_MULT
+
+        # All enabled options for the settings tab
+        self.am_settings = {
+            'profiles': {'title': 'Profiles', 'type': 'divider'},
+            'default_profile': {'title': 'Default profile', 'type': 'integer', 'min': 0, 'max': self.profiles, 'width': 1, 'qsid': 0},
+            'profile_switch_mode': {'title': 'Profile switch mode', 'type': 'combo', 'options': ('Last profile', 'Default profile', 'Manual'), 'qsid': 1},
+            'deadzone_divider': {'title': 'Deadzones', 'type': 'divider'},
+            'top_deadzone': {'title': 'Top deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 2},
+            'bottom_deadzone': {'title': 'Bottom deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 3},
+            'smoothing': {'title': 'Smoothing', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 4},
+            'top_mult': {'title': 'Top deadzone multiplier', 'type': 'float', 'min': 0, 'max': 2.5, 'step': 0.01, 'width': 1, 'qsid': 5},
+        }
+
+        # Add additional settings based on enabled features
+        if self.am_config['split_keyboard']:
+            # self.settings['mult_label'] = {'title': 'Split Multipliers', 'type': 'divider'}
+            self.am_settings['right_mult'] = {'title': 'Right multiplier', 'type': 'float', 'min': 0, 'max': 2.55, 'step': 0.01, 'width': 1, 'qsid': 6}
+            self.am_settings['slave_mult'] = {'title': 'Slave multiplier', 'type': 'float', 'min': 0, 'max': 2.55, 'step': 0.01, 'width': 1, 'qsid': 7}
+            
+        if self.am_config['adjustable_filter_strength']:
+            self.am_settings['filter_strength'] = {'title': 'Filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 8}
+            if self.am_config['split_keyboard']:
+                # self.am_settings['right_filter_strength'] = {'title': 'Right filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 8}
+                self.am_settings['slave_filter_strength'] = {'title': 'Slave filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 9}
+
+        if self.am_config['priority_mode']:
+            self.am_settings['prio_label'] = {'title': 'Priority', 'type': 'divider'}
+            #TODO: Add prio profile buttons here
+
+            if self.am_config['priority_indices']:
+                self.am_settings['priority_level'] = {'title': 'Priority level', 'type': 'integer', 'min': 0, 'max': 10, 'width': 1, 'qsid': 11}
+
+        if self.am_config['dynamic_calibration']:
+            self.am_settings['dynamic_calibration'] = {'title': 'Dynamic Calibration', 'type': 'divider'}
+            self.am_settings['dc_switch_num'] = {'title': 'Switch amount', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 12}
+            self.am_settings['dc_delta'] = {'title': 'Delta', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 13}
+            self.am_settings['dc_factor'] = {'title': 'Factor', 'type': 'float', 'min': 0, 'max': 0.5, 'step': 0.01, 'width': 1, 'qsid': 14}
+
+        self.setting_values = [0 for _ in range(HIGHEST_QSID)]
 
         return True
 
@@ -218,6 +259,12 @@ class ProtocolAnalogMatrix(BaseProtocol):
             parsed_len += 2
             data = full_data[parsed_len:]
 
+            if self.am_config['priority_indices']:
+                print("Test")
+                self.am_config['priority_level'] = struct.unpack('B', data[:1])[0]
+                parsed_len += 1
+                data = full_data[parsed_len:]
+
         if self.am_config['dynamic_calibration']:
             data = struct.unpack('BBB', data[:3])
             self.am_config['dc_switch_num'] = data[0]
@@ -255,6 +302,12 @@ class ProtocolAnalogMatrix(BaseProtocol):
         self.keyboard_def_size = struct.unpack('<H', data[:2])[0] # Even though this should be the end of the array, use a slice just in case it's wrong
         if len(full_data) != self.keyboard_def_size:
             print("WARNING: The size of the transferred definition doesn't equal the keyboard definition size!")
+
+        # Assign the setting values
+        for key, option in self.am_settings.items():
+            if option['type'] == 'divider': continue
+            self.setting_values[option['qsid']] = self.am_config[key]
+
 
     #MARK: Get Matrix
     def get_transformation_matrices(self):
@@ -387,6 +440,10 @@ class ProtocolAnalogMatrix(BaseProtocol):
         self.am_config['priority_profiles'] ^= 1 << profile
         value = self.am_config['priority_profiles']
         self.usb_send(self.dev, struct.pack('<BBH', AM_PREFIX, AM_SET_PRIORITY_PROFILES, value), retries=20)
+
+    def set_priority_level(self, level):
+        self.am_config['priority_level'] = level
+        self.usb_send()
 
 
     def set_dynamic_calibration(self, type, value):

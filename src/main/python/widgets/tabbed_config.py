@@ -1,5 +1,6 @@
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtWidgets import QLabel, QPushButton, QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QRadioButton, QButtonGroup, QProgressBar, QSlider, QLineEdit, QCheckBox
+from PyQt5.QtWidgets import QLabel, QPushButton, QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QRadioButton, QButtonGroup, QProgressBar, QSlider, QLineEdit, QCheckBox, QApplication
+from PyQt5.QtGui import QPalette
 from util import tr
 from protocol.analog_matrix import SWITCH_PRESS_HEIGHT, SWITCH_RELEASE_HEIGHT, SWITCH_PRESS_DISTANCE, SWITCH_RELEASE_DISTANCE
 
@@ -9,10 +10,16 @@ class TabbedConfig(QScrollArea):
     def __init__(self):
         super().__init__()
         
+        self.setMinimumHeight(330)
         self.layout = QHBoxLayout()
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setWidgetResizable(True)
+
+        #TODO: To use style sheets here, I'd need to wrap each segment into a helper layout + widget and apply the style to that widget
+        # self.switch_helper = QWidget()
+        # self.switch_helper.setStyleSheet("background-color: {}".format(QApplication.palette().color(QPalette.Button).lighter(130).name()))
+        # self.layout.addWidget(self.switch_helper)
 
         self.keyboard = None
 
@@ -41,16 +48,22 @@ class TabbedConfig(QScrollArea):
 
         # Switch value bar
         self.switch_layout = QVBoxLayout()
+        self.switch_layout.setAlignment(Qt.AlignCenter)
         self.switch_layout.setContentsMargins(10, 0, 10, 0)
+        #NOTE: To use style sheets here, I'd need to wrap each segment into a helper layout + widget and apply the style to that widget
+        # self.switch_helper.setLayout(self.switch_layout)
         self.layout.addLayout(self.switch_layout)
         self.tabbed_layouts.append(self.switch_layout)
         switch_label = QLabel(tr("AnalogMatrixEditor", "Switch value"))
         self.switch_layout.addWidget(switch_label)
         self.tabbed_layouts.append(switch_label)
-        self.switch_label = QLabel("No switch selected")
+        self.switch_label = QLabel(tr("AnalogMatrixEditor", "No switch selected"))
+        self.switch_label.setMinimumWidth(140) # Keeps the label from expanding when a switch is selected
+        #TODO: Stop the animation from playing (style guide?)
         self.switch_value_bar = QProgressBar(textVisible=False)
         self.switch_value_bar.setOrientation(Qt.Vertical)
         self.switch_value_bar.setInvertedAppearance(True)
+        self.switch_value_bar.setRange(0, 100)
         #TODO: When refreshing with a selected index, keyboard.switch_value isn't available even though it's initialized to 0 and am_config is printable
         # When refreshing the keyboards, the active key is deselected anyway -> clear the active index as well
         # if self.index < 255:
@@ -60,15 +73,16 @@ class TabbedConfig(QScrollArea):
         #     self.switch_value_bar.setValue(100 - clamp_int(self.keyboard.switch_value))
         self.switch_layout.addWidget(self.switch_label)
         self.tabbed_layouts.append(self.switch_label)
-        self.switch_value_bar.setRange(0, 100)
         self.switch_layout.addWidget(self.switch_value_bar)
         self.tabbed_layouts.append(self.switch_value_bar)
 
         # Key mode radio buttons
         self.key_mode_layout = QVBoxLayout()
+        self.key_mode_layout.setAlignment(Qt.AlignCenter)
         self.key_mode_layout.setContentsMargins(10, 0, 10, 0)
         self.tabbed_layouts.append(self.key_mode_layout)
         key_mode_label = QLabel(tr("AnalogMatrixEditor", "Key mode"))
+        key_mode_label.setAlignment(Qt.AlignBottom)
         self.key_mode_layout.addWidget(key_mode_label)
         self.tabbed_layouts.append(key_mode_label)
         mode_selection = []
@@ -95,7 +109,6 @@ class TabbedConfig(QScrollArea):
         invert_sliders = not self.keyboard.am_config['distance_from_bottom']
         slider_range = (0, self.keyboard.am_config['travel_distance'] * SLIDER_MULT)
         # Trigger/Release height slider
-        self.move_heights_together = False
         self.height_field = ActuationWidget('Fixed Height', invert_sliders, slider_range, enable_sliders, keyboard.am_config['travel_distance'], keyboard.am_config['use_high_resolution'])
         self.layout.addLayout(self.height_field)
         self.height_field.press_slider.valueChanged.connect(lambda value: self.actuation_changed(SWITCH_PRESS_HEIGHT, value/SLIDER_MULT))
@@ -104,7 +117,6 @@ class TabbedConfig(QScrollArea):
         self.height_field.setEnabled(False)
 
         # Press/Release distance slider
-        self.move_distances_together = False
         self.rt_field = ActuationWidget('Rapid Trigger', invert_sliders, slider_range, enable_sliders, keyboard.am_config['travel_distance'], keyboard.am_config['use_high_resolution'])
         self.layout.addLayout(self.rt_field)
         self.rt_field.press_slider.valueChanged.connect(lambda value: self.actuation_changed(SWITCH_PRESS_DISTANCE, value/SLIDER_MULT))
@@ -192,23 +204,28 @@ class TabbedConfig(QScrollArea):
         if   actuation_index == SWITCH_PRESS_HEIGHT: 
             height_type = 'trigger_height'
             self.height_field.setValue('press', value)
-            if self.move_heights_together:
-                self.height_field.setValue('release', value)
-                for index in self.index_list:
-                    self.keyboard.set_switch_height(index, self.keyboard.am_profile, 'release', value)
+            if self.height_field.sync:
+                self.height_field.setValue('release', value + self.height_field.offset)
             # Check if the trigger height has moved above the release height
-            #TODO: Do the same the other way around
             elif self.keyboard.am_config['distance_from_bottom']:
-                if value < float(self.height_field.release_entry.Text()):
+                if value > float(self.height_field.release_entry.text()):
                     self.height_field.setValue('release', value)
             else:
-                if value > float(self.height_field.release_entry.Text()):
+                if value < float(self.height_field.release_entry.text()):
                     self.height_field.setValue('release', value)
+                    
         elif actuation_index == SWITCH_RELEASE_HEIGHT:
             height_type = 'release_height'
-            self.height_field.setValue('release', value)
+            if not self.height_field.sync:
+                self.height_field.setValue('release', value)
+                # Check if the release height has moved below the press height
+                if self.keyboard.am_config['distance_from_bottom']:
+                    if value < float(self.height_field.press_entry.text()):
+                        self.height_field.setValue('press', value)
+                else:
+                    if value > float(self.height_field.press_entry.text()):
+                        self.height_field.setValue('press', value)
 
-        #TODO: How does this function work? If sync is active, does it already get the synced value on both calls? Probably, meaning I could simplify rt sync stuff
         elif actuation_index == SWITCH_PRESS_DISTANCE:
             height_type = 'rt_press'
             self.rt_field.setValue('press', value)
@@ -392,6 +409,12 @@ class ActuationWidget(QVBoxLayout):
                 # Round down to the closest slider step
                 self.offset = (value - (value % 2)) / 100
                 self.offset_entry.setText(str(self.offset))
+
+                # If sync is enabled, immediately apply the offset
+                if self.sync:
+                    release_value = clamp(float(self.press_entry.text()) + self.offset, 0, self.switch_travel)
+                    self.setValue('release', release_value)
+
             else:
                 value = clamp(float(value), largest=self.switch_travel) * 100
                 value -= value % 2
@@ -413,6 +436,10 @@ class ActuationWidget(QVBoxLayout):
 
     def toggleSync(self):
         self.sync = not self.sync
+        # If sync is enabled, immediately apply the offset
+        if self.sync:
+            release_value = clamp(float(self.press_entry.text()) + self.offset, 0, self.switch_travel)
+            self.setValue('release', release_value)
         self.setEnabled()
 
 
@@ -437,7 +464,9 @@ class SwitchSettingsWidget(QVBoxLayout):
         self.profile = profile
         self.contents = []
 
+        self.setAlignment(Qt.AlignCenter)
         label = QLabel(tr("AnalogMatrixEditor", "Switch settings"))
+        # label.setAlignment(Qt.AlignBottom)
         self.addWidget(label)
         self.contents.append(label)
 
@@ -502,6 +531,7 @@ class SwitchSettingsWidget(QVBoxLayout):
 
     def togglePriority(self):
         #TODO: Check that the correct state is grabbed
+        if self.config == []: return
         status = not self.config[-1]['priority_status']
         self.config[-1]['priority_status'] = status
         for idx, index in enumerate(self.index_list):
@@ -536,7 +566,7 @@ class SwitchSettingsWidget(QVBoxLayout):
     def reset_to_default(self):
         profile = self.profile
         PRESS_HEIGHT = 1.5 if not self.keyboard.am_config['distance_from_bottom'] else self.keyboard.am_config['travel_distance'] - 1.5
-        RELEASE_HEIGHT = 1.4 if not self.keyboard.am_config['distance_from_bottom'] else self.keyboard.am_config['travel_distance'] - 1.4
+        RELEASE_HEIGHT = 1.3 if not self.keyboard.am_config['distance_from_bottom'] else self.keyboard.am_config['travel_distance'] - 1.3
         RT_DISTANCE = 0.5
         MODE = 0
         for index in self.index_list:

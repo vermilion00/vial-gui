@@ -4,11 +4,11 @@ from collections import defaultdict
 
 from PyQt5.QtCore import Qt, QSize, QRect, QPointF, pyqtSignal, QEvent, QRectF, QPoint, QLine
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QTransform, QBrush, QPolygonF, QPalette
-from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QMessageBox, QWidget, QSpinBox,  QToolTip, QApplication, QRubberBand, QAction
+from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QMessageBox, QWidget, QDoubleSpinBox, QComboBox, QToolTip, QApplication, QRubberBand, QAction, QSizePolicy, QSpacerItem, QScrollArea, QPushButton
 from themes import Theme
 
 from editor.basic_editor import BasicEditor
-from editor.qmk_settings import BooleanOption, IntegerOption
+from editor.qmk_settings import BooleanOption, IntegerOption, GenericOption
 from widgets.keyboard_widget import KeyboardWidget
 from widgets.square_button import SquareButton
 from util import tr, KeycodeDisplay
@@ -57,6 +57,7 @@ class AnalogMatrixEditor(BasicEditor):
         layout_labels_container.addLayout(self.layout_size)
 
         self.container = AMKeyboardWidget(layout_editor, self.keyboard)
+        self.container.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.container.clicked.connect(self.on_key_clicked)
         self.container.deselected.connect(self.on_key_deselected)
 
@@ -118,11 +119,10 @@ class AnalogMatrixEditor(BasicEditor):
             if x < self.keyboard.profiles:
                 btn.setCheckable(True)
                 btn.clicked.connect(lambda state, idx=x: self.switch_profile(idx))
-            else: # Show buttons for unused profiles, but apply a different style and disable them
+            else: # Show buttons for unused profiles, but disable them
                 btn.setDisabled(True)
-                # btn.setCheckable(False)
 
-            # Auto-enable the button for the active profile
+            # Check the button for the active profile
             if x == self.keyboard.am_profile:
                 btn.setChecked(True)
 
@@ -192,7 +192,6 @@ class AnalogMatrixEditor(BasicEditor):
             self.refresh_profile_display()
             self.rebuild_profiles()
 
-
         self.container.setEnabled(self.valid())
 
 
@@ -215,20 +214,18 @@ class AnalogMatrixEditor(BasicEditor):
         self.refresh_profile_display()
         self.rebuild_profiles()
 
-    #NOTE: This gets the keycode for the provided widget (each widget here represents a key)
-    #TODO: the display layer is set after this is called
+
     def code_for_widget(self, widget):
         if widget.desc.row is not None:
             return self.keyboard.layout[(self.display_layer, widget.desc.row, widget.desc.col)]
         else:
             return self.keyboard.encoder_layout[(self.display_layer, widget.desc.encoder_idx,
                                                  widget.desc.encoder_dir)]
+        
 
-    #TODO: Update this for profiles instead
     def refresh_profile_display(self):
         """ Refresh text on key widgets to display data corresponding to current layer """
 
-        #TODO: Instead of updating the text on the switches, it should update the profile related icons instead (key mode, prio key etc)
         self.container.update_layout()
 
         for idx, btn in enumerate(self.profile_buttons):
@@ -242,12 +239,11 @@ class AnalogMatrixEditor(BasicEditor):
         self.container.update()
         self.container.updateGeometry()
 
-    #TODO: Need to draw the keycodes after this is called, since the display layer is set too late currently
+
     def switch_profile(self, idx):
         self.keyboard.am_profile = idx
         self.keyboard.set_active_profile(idx)
         
-        #TODO: This currently isn't used anywhere, as the keycodes are painted before this is assigned
         # Show the keycodes for the lowest assigned layer
         layer = 0
         assigned_layer = False
@@ -270,7 +266,8 @@ class AnalogMatrixEditor(BasicEditor):
             self.rebuild_profiles()
 
     def remove_profile(self):
-        if self.keyboard.am_profile == self.keyboard.profile - 1:
+        # If the currently selected profile was deleted, select profile 0
+        if self.keyboard.am_profile == self.keyboard.profiles - 1:
             self.keyboard.am_profile = 0
 
         if self.keyboard.profiles > 1:
@@ -294,64 +291,232 @@ class AnalogMatrixEditor(BasicEditor):
                 self.index_list.append(self.keyboard.matrix_to_num[key.desc.row][key.desc.col])
         self.tabbed_config.update_index(self.index, self.index_list)
 
-    #NOTE: This is called when the empty space around the keyboard is pressed
-    #TODO: Will need to hook into this to be able to drag select keys
     def on_key_deselected(self):
         self.index = 255
         self.tabbed_config.update_index(255)
 
 
+#MARK: Options
+class AMIntegerOption(IntegerOption):
+    def reload(self, keyboard):
+        value = keyboard.setting_values[self.qsid]
+        self.spinbox.blockSignals(True)
+        self.spinbox.setValue(value)
+        self.spinbox.blockSignals(False)
+
+#TODO: The float option doesn't get deleted properly, the spinbox remains
+class FloatOption(GenericOption):
+    def __init__(self, option, container):
+        super().__init__(option, container)
+        self.spinbox = QDoubleSpinBox()
+        self.spinbox.setMinimum(option["min"])
+        self.spinbox.setMaximum(option["max"])
+        self.spinbox.setSingleStep(option["step"])
+        self.spinbox.valueChanged.connect(self.on_change)
+        self.container.addWidget(self.spinbox, self.row, 1)
+
+    def reload(self, keyboard):
+        value = super().reload(keyboard)
+        self.spinbox.blockSignals(True)
+        self.spinbox.setValue(value)
+        self.spinbox.blockSignals(False)
+
+    def value(self):
+        return self.spinbox.value()
+
+    def delete(self):
+        super().delete()
+        self.spinbox.hide()
+        self.spinbox.deleteLater()
+
+    
+class ComboboxOption(GenericOption):
+    def __init__(self, option, container):
+        super().__init__(option, container)
+        self.combobox = QComboBox()
+        self.combobox.addItems(option['options'])
+        self.combobox.currentIndexChanged.connect(self.on_change)
+        self.container.addWidget(self.combobox, self.row, 1)
+
+    def reload(self, keyboard):
+        value = keyboard.setting_values[self.qsid]
+        self.combobox.blockSignals(True)
+        self.combobox.setCurrentIndex(value)
+        self.combobox.blockSignals(False)
+
+    def value(self):
+        return self.combobox.currentIndex()
+
+    def delete(self):
+        super().delete()
+        self.combobox.hide()
+        self.combobox.deleteLater()
+
+
+#MARK: Settings
+#TODO: The scrollbar doesn't work, the widget inside just gets smaller and smaller
+#      The values aren't applied ever
+#      The values aren't grabbed correctly, probably aren't even actually available at this point
 class AnalogMatrixSettings(BasicEditor):
     def __init__(self):
         super().__init__()
 
         self.contents = []
-
         self.keyboard = None
-
-        # self.layout = QVBoxLayout()
-        # self.addLayout(self.layout)
-        # self.contents.append(self.layout)
         self.options = []
-
-        self.container = QGridLayout()
-        self.addLayout(self.container)
-    
-        #TODO: Make sure the qsid doesn't fuck it up
-        #      Is it supposed to be the value? Do I need to set it to the current state, or is it an actual ID?
-        #      These are pulled from a json
-        options = {
-            'top_deadzone': {'title': 'Top Deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'qsid': 0, 'width': 1},
-            'bottom_deadzone': {'title': 'Bottom Deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'qsid': 1, 'width': 1}
-        }
         
-        for key in options.keys():
-            if options[key] == 'integer':
-                self.options = IntegerOption(key, self.container)
-                # self.options.append(IntegerOption(key, self.container))
-                # self.container.addWidget(self.options[-1])
-                self.container.addWidget(self.options[-1])
-            elif options[key] == 'boolean':
-                self.options.append(BooleanOption(key, self.container))
-                self.container.addWidget(self.options[-1])
+        self.settings_widget = QScrollArea()
+        self.settings_widget.setStyleSheet("QScrollArea { background-color:transparent; }")
+        self.settings_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.settings_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.settings_widget.setWidgetResizable(True)
+
+        self.addWidget(self.settings_widget)
+        self.container = QGridLayout()
+        self.settings_widget.setLayout(self.container)
+        self.container.setAlignment(Qt.AlignCenter)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        self.btn_save = QPushButton(tr("QmkSettings", "Save"))
+        self.btn_save.setEnabled(False)
+        self.btn_save.clicked.connect(self.save_settings)
+        buttons.addWidget(self.btn_save)
+        self.btn_undo = QPushButton(tr("QmkSettings", "Undo"))
+        self.btn_undo.setEnabled(False)
+        self.btn_undo.clicked.connect(self.reload_settings)
+        buttons.addWidget(self.btn_undo)
+        btn_reset = QPushButton(tr("QmkSettings", "Reset"))
+        btn_reset.clicked.connect(self.reset_settings)
+        buttons.addWidget(btn_reset)
+        self.addLayout(buttons)
 
 
     def rebuild(self, device):
         super().rebuild(device)
         if self.valid():
             self.keyboard = device.keyboard
+            self.recreate_gui()
 
         self.container.setEnabled(self.valid())
 
 
+    def recreate_gui(self):
+        #TODO: Float spinboxes aren't deleted
+        for option in self.options:
+            if isinstance(option, QLabel):
+                option.hide()
+                option.deleteLater()
+            else:
+                option.delete()
+        self.options.clear()
+
+        # for option in self.settings.values():
+        #TODO: Decide if I want to add QLabels to self.options or not (probably yes, how else am I going to delete them?)
+        for option in self.keyboard.am_settings.values():
+            if option['type'] == 'divider':
+                # Change the label style to better act as a divider
+                opt = QLabel(f"<b>{option['title']}</b>")
+                opt.setMinimumHeight(28)
+                opt.setAlignment(Qt.AlignBottom)
+                self.container.addWidget(opt, self.container.rowCount(), 0)
+                # label = QLabel(f"<b>{option['title']}</b>")
+                # label.setMinimumHeight(28)
+                # label.setAlignment(Qt.AlignBottom)
+                # self.container.addWidget(label, self.container.rowCount(), 0)
+                # continue
+
+            elif option['type'] == 'integer':
+                opt = AMIntegerOption(option, self.container)
+                opt.changed.connect(self.on_change)
+
+            elif option['type'] == 'boolean':
+                opt = BooleanOption(option, self.container)
+                opt.changed.connect(self.on_change)
+
+            elif option['type'] == 'float':
+                opt = FloatOption(option, self.container)
+                opt.changed.connect(self.on_change)
+
+            elif option['type'] == 'combo':
+                opt = ComboboxOption(option, self.container)
+                opt.changed.connect(self.on_change)
+
+            #TODO: Add type that is just a series of buttons toggling bits -> prio profiles
+
+            else:
+                continue
+            
+            self.options.append(opt)
+            # opt.changed.connect(self.on_change)
+        
+    def reload_settings(self):
+        self.btn_save.setEnabled(False)
+        self.btn_undo.setEnabled(False)
+        # self.keyboard.reload_settings()
+        self.recreate_gui()
+
+        for option in self.options:
+            if isinstance(option, QLabel): continue
+
+            option.reload(self.keyboard)
+
+        self.on_change()
+                
+
+    #TODO: Adjust this for am stuff
+    def on_change(self):
+        changed = False
+        #TODO: Get the keyboard setting state
+        qsid_values = self.prepare_settings()
+
+        for option in self.options:
+            if isinstance(option, QLabel): continue
+
+            if qsid_values[option.qsid] != self.keyboard.setting_values[option.qsid]:
+                changed = True
+                #TODO: Set the change
+                # if option.qsid == 0:
+                self.keyboard.setting_values[option.qsid] = qsid_values[option.qsid]
+
+        if changed:
+            self.btn_save.setEnabled(changed)
+            self.btn_undo.setEnabled(changed)
+
+    def prepare_settings(self):
+        HIGHEST_QSID = 20
+        values = [0 for _ in range(HIGHEST_QSID)]
+
+        #TODO: For better support for boolean values, I should just actually use the QSID
+        for field in self.options:
+            if isinstance(field, QLabel): continue
+
+            values[field.qsid] = field.value()
+
+        return values
+
     # Only return valid if analog matrix is enabled on the keyboard
     def valid(self):
         return isinstance(self.device, VialKeyboard) and self.device.keyboard and self.device.keyboard.am_enabled
+    
 
+    def save_settings(self):
+        self.btn_save.setEnabled(False)
+        pass
 
+    # def reload_settings(self):
+    #     self.btn_save.setEnabled(False)
+    #     self.btn_undo.setEnabled(False)
+
+    def reset_settings(self):
+        self.btn_save.setEnabled(True)
+        pass
+
+#MARK: Keyboard widget
 class AMKeyboardWidget(KeyboardWidget):
     def __init__(self, layout_editor, keyboard):
         super().__init__(layout_editor)
+        #TODO: Size policy is ignored
+        # self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.keyboard = keyboard
         self.active_key_list = []
         self.selected_list = []
@@ -362,12 +527,22 @@ class AMKeyboardWidget(KeyboardWidget):
         #TODO: Instead of setting this to a fixed value, update this according to the bounds of the parent widget
         #->Set the parent to be stretched, then set this value to the difference between the key center and the widget center / 2
         self.widget_padding = 150
+        # self.widget_padding = 0
         # self.parent_width = 0
 
+        # Mass select shortcut actions
         self.select_all_action = QAction(self)
-        self.select_all_action.setShortcut("Ctrl+A")
-        self.select_all_action.triggered.connect(self.select_all)
+        self.select_all_action.setShortcuts(["Ctrl+A", "Ctrl+Shift+A"])
+        self.select_all_action.triggered.connect(lambda _: self.select_keys('all'))
         self.addAction(self.select_all_action)
+        self.select_left_action = QAction(self)
+        self.select_left_action.setShortcut("Ctrl+Shift+L")
+        self.select_left_action.triggered.connect(lambda _: self.select_keys('left'))
+        self.addAction(self.select_left_action)
+        self.select_right_action = QAction(self)
+        self.select_right_action.setShortcut("Ctrl+Shift+R")
+        self.select_right_action.triggered.connect(lambda _: self.select_keys('right'))
+        self.addAction(self.select_right_action)
         self.deselect_action = QAction(self)
         self.deselect_action.setShortcut("Esc")
         self.deselect_action.triggered.connect(self.deselect)
@@ -378,10 +553,18 @@ class AMKeyboardWidget(KeyboardWidget):
         self.keyboard = keyboard
 
 
-    def select_all(self):
+    def select_keys(self, type):
         self.active_key_list = []
+
+        if type == 'all': key_range = (0, self.keyboard.am_config['total_switch_num'])
+        elif type == 'left': key_range = (0, self.keyboard.am_config['switch_num'])
+        elif type == 'right': key_range = (self.keyboard.am_config['switch_num'], self.keyboard.am_config['total_switch_num'])
+
+        matrix_to_num = self.keyboard.matrix_to_num
+
         for key in self.widgets:
-            self.active_key_list.append(key)
+            if matrix_to_num[key.desc.row][key.desc.col] in range(key_range[0], key_range[1]):
+                self.active_key_list.append(key)
 
         if self.active_key is None:
             self.active_key = self.active_key_list[0]
@@ -486,11 +669,11 @@ class AMKeyboardWidget(KeyboardWidget):
                 #NOTE: Top left corner is 0, 0
                 # # Check if we're using inclusive or exclusive mode
                 if ev.pos().x() < self.rubberband_origin.x():
-                    mode = EXCLUSIVE_MODE
+                    mode = INCLUSIVE_MODE
                     left_x = ev.pos().x() / self.scale
                     right_x = self.rubberband_origin.x() / self.scale
                 else:
-                    mode = INCLUSIVE_MODE
+                    mode = EXCLUSIVE_MODE
                     left_x = self.rubberband_origin.x() / self.scale
                     right_x = ev.pos().x() / self.scale
                 top_y = min(self.rubberband_origin.y(), ev.pos().y()) / self.scale
@@ -515,6 +698,8 @@ class AMKeyboardWidget(KeyboardWidget):
                             self.active_key.active = False
                             self.active_key = None
                             self.clicked.emit()
+                            self.update()
+                            
                         if left_x < l_x and top_y < t_y and right_x > r_x and bottom_y > b_y:
                             self.selected_list.append(key)
 
