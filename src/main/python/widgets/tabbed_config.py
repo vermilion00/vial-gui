@@ -1,5 +1,5 @@
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtWidgets import QLabel, QPushButton, QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QRadioButton, QButtonGroup, QProgressBar, QSlider, QLineEdit, QCheckBox, QApplication
+from PyQt5.QtWidgets import QLabel, QPushButton, QWidget, QScrollArea, QVBoxLayout, QHBoxLayout, QRadioButton, QButtonGroup, QProgressBar, QSlider, QLineEdit, QCheckBox, QComboBox
 from PyQt5.QtGui import QPalette
 from util import tr
 from protocol.analog_matrix import SWITCH_PRESS_HEIGHT, SWITCH_RELEASE_HEIGHT, SWITCH_PRESS_DISTANCE, SWITCH_RELEASE_DISTANCE
@@ -200,6 +200,12 @@ class TabbedConfig(QScrollArea):
                 self.keyboard.set_switch_mode(index, self.keyboard.am_profile, mode)
 
 
+    #TODO: This is called anytime the text in the fields changes
+    #       -> Hence why having sync enabled applies it to any switch that's selected after
+    #       -> Also why selecting multiple switches applies the settings of one to all of them
+    #       -> The current issue where text isn't grabbed is also because of this, caused by switching from an empty release field to a full one
+    #       -> Since it should only be called if a value is changed, and not when a new switch is selected, check for an index change
+    #           -> Need to make sure that the text is still updated correctly though, try to decouple text changes from actual setting changes if possible
     def actuation_changed(self, actuation_index, value):
         if   actuation_index == SWITCH_PRESS_HEIGHT: 
             height_type = 'trigger_height'
@@ -208,10 +214,13 @@ class TabbedConfig(QScrollArea):
                 self.height_field.setValue('release', value + self.height_field.offset)
             # Check if the trigger height has moved above the release height
             elif self.keyboard.am_config['distance_from_bottom']:
-                if value > float(self.height_field.release_entry.text()):
+                text = self.height_field.release_entry.text()
+                if text is not '' and value > float(text):
                     self.height_field.setValue('release', value)
             else:
-                if value < float(self.height_field.release_entry.text()):
+                #TODO: This is delayed by one, is that a problem?
+                text = self.height_field.release_entry.text()
+                if text is not '' and value < float(text):
                     self.height_field.setValue('release', value)
                     
         elif actuation_index == SWITCH_RELEASE_HEIGHT:
@@ -238,6 +247,7 @@ class TabbedConfig(QScrollArea):
             if not self.rt_field.sync:
                 self.rt_field.setValue('release', value)
 
+        #TODO: Is it perhaps calling actuation changed recursively many times, when heights are synced?
         for index in self.index_list:
             self.keyboard.set_switch_height(index, self.keyboard.am_profile, height_type, value)
 
@@ -461,24 +471,29 @@ class SwitchSettingsWidget(QVBoxLayout):
         self.keyboard = keyboard
         self.config = []
         self.index = index
+        self.index_list = []
         self.profile = profile
         self.contents = []
+        self.init_modes = ['None']
 
         self.setAlignment(Qt.AlignCenter)
         label = QLabel(tr("AnalogMatrixEditor", "Switch settings"))
-        # label.setAlignment(Qt.AlignBottom)
         self.addWidget(label)
         self.contents.append(label)
+        self.priority_checkbox = QCheckBox('Priority')
+        self.addWidget(self.priority_checkbox)
+        self.priority_checkbox.stateChanged.connect(self.togglePriority)
+        self.contents.append(self.priority_checkbox)
+        if keyboard.am_config['priority_indices']:
+            self.priority_checkbox.setEnabled(True)
 
-        if keyboard.am_config['priority_mode']:
-            self.priority_checkbox = QCheckBox('Priority')
-            self.addWidget(self.priority_checkbox)
-            self.priority_checkbox.stateChanged.connect(self.togglePriority)
-            self.contents.append(self.priority_checkbox)
-            if index < 255:
-                self.priority_checkbox.setChecked(keyboard.am_config['priority_mode'])
-            else:
-                self.priority_checkbox.setEnabled(False)
+        combo_label = QLabel(tr("AnalogMatrixEditor", "Init key mode"))
+        self.init_combo = QComboBox()
+        self.init_combo.currentIndexChanged.connect(self.setInitKey)
+        self.init_combo.setEnabled(len(self.index_list) == 1)
+        self.init_combo.addItem('None')
+        self.addWidget(combo_label)
+        self.addWidget(self.init_combo)
 
         self.previous_button = QPushButton('Reset to Previous')
         self.addWidget(self.previous_button)
@@ -497,6 +512,8 @@ class SwitchSettingsWidget(QVBoxLayout):
         self.save_button.clicked.connect(self.keyboard.send_save_config)
         self.contents.append(self.save_button)
 
+        self.contents += [combo_label, self.init_combo]
+
     def update_index(self, keyboard, index, index_list, profile):
         self.keyboard = keyboard
         self.index = index
@@ -504,7 +521,7 @@ class SwitchSettingsWidget(QVBoxLayout):
         self.profile = profile
         if index < 255:
             self.config = []
-            if keyboard.am_config['priority_mode']:
+            if keyboard.am_config['priority_indices']:
                 self.priority_checkbox.setEnabled(True)
                 
             for idx, index in enumerate(index_list):
@@ -522,11 +539,21 @@ class SwitchSettingsWidget(QVBoxLayout):
                 self.default_button.setEnabled(True)
                 if self.config[idx]['priority_status']:
                     self.priority_checkbox.setChecked(self.config[idx]['priority_status'])
+
+            #TODO: 
+            if len(self.index_list) == 1:
+                self.init_combo.setEnabled(True)
+                self.init_combo.clear()
+                self.init_combo.addItems
+
         else:
             self.previous_button.setEnabled(False)
             self.default_button.setEnabled(False)
-            if keyboard.am_config['priority_mode']:
-                self.priority_checkbox.setEnabled(False)
+            self.priority_checkbox.setEnabled(False)
+
+    
+    def setInitKey(self):
+        pass
 
 
     def togglePriority(self):

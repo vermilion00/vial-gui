@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from PyQt5.QtCore import Qt, QSize, QRect, QPointF, pyqtSignal, QEvent, QRectF, QPoint, QLine
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QTransform, QBrush, QPolygonF, QPalette
-from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QMessageBox, QWidget, QDoubleSpinBox, QComboBox, QToolTip, QApplication, QRubberBand, QAction, QSizePolicy, QSpacerItem, QScrollArea, QPushButton
+from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QMessageBox, QWidget, QSpinBox, QDoubleSpinBox, QComboBox, QToolTip, QApplication, QRubberBand, QAction, QSizePolicy, QScrollArea, QPushButton
 from themes import Theme
 
 from editor.basic_editor import BasicEditor
@@ -299,12 +299,11 @@ class AnalogMatrixEditor(BasicEditor):
 #MARK: Options
 class AMIntegerOption(IntegerOption):
     def reload(self, keyboard):
-        value = keyboard.setting_values[self.qsid]
+        value = keyboard.saved_values[self.qsid]
         self.spinbox.blockSignals(True)
         self.spinbox.setValue(value)
         self.spinbox.blockSignals(False)
 
-#TODO: The float option doesn't get deleted properly, the spinbox remains
 class FloatOption(GenericOption):
     def __init__(self, option, container):
         super().__init__(option, container)
@@ -316,7 +315,7 @@ class FloatOption(GenericOption):
         self.container.addWidget(self.spinbox, self.row, 1)
 
     def reload(self, keyboard):
-        value = super().reload(keyboard)
+        value = keyboard.saved_values[self.qsid]
         self.spinbox.blockSignals(True)
         self.spinbox.setValue(value)
         self.spinbox.blockSignals(False)
@@ -339,7 +338,7 @@ class ComboboxOption(GenericOption):
         self.container.addWidget(self.combobox, self.row, 1)
 
     def reload(self, keyboard):
-        value = keyboard.setting_values[self.qsid]
+        value = keyboard.saved_values[self.qsid]
         self.combobox.blockSignals(True)
         self.combobox.setCurrentIndex(value)
         self.combobox.blockSignals(False)
@@ -351,6 +350,32 @@ class ComboboxOption(GenericOption):
         super().delete()
         self.combobox.hide()
         self.combobox.deleteLater()
+        
+
+#TODO: Do I want to set this in the settings tab, or in the tabbed config?
+#      -Could add a combobox to the settings section in the tab
+#       -Would need to keep track of the amount of keys defined per option, and only show available types
+
+# class MatrixOption(GenericOption):
+#     def __init__(self, option, container):
+#         super().__init__(option, container)
+#         self.spinbox = QLineEdit()
+#         self.spinbox.valueChanged.connect(self.on_change)
+#         self.container.addWidget(self.spinbox, self.row, 1)
+
+#     def reload(self, keyboard):
+#         value = keyboard.saved_values[self.qsid]
+#         self.spinbox.blockSignals(True)
+#         self.spinbox.setValue(value)
+#         self.spinbox.blockSignals(False)
+
+#     def value(self):
+#         return self.spinbox.value()
+
+#     def delete(self):
+#         super().delete()
+#         self.spinbox.hide()
+#         self.spinbox.deleteLater()
 
 
 #MARK: Settings
@@ -381,13 +406,14 @@ class AnalogMatrixSettings(BasicEditor):
         self.btn_save.setEnabled(False)
         self.btn_save.clicked.connect(self.save_settings)
         buttons.addWidget(self.btn_save)
+        self.btn_update = QPushButton(tr("QmkSettings", "Update"))
+        self.btn_update.setEnabled(False)
+        self.btn_update.clicked.connect(self.update_settings)
+        buttons.addWidget(self.btn_update)
         self.btn_undo = QPushButton(tr("QmkSettings", "Undo"))
         self.btn_undo.setEnabled(False)
         self.btn_undo.clicked.connect(self.reload_settings)
         buttons.addWidget(self.btn_undo)
-        btn_reset = QPushButton(tr("QmkSettings", "Reset"))
-        btn_reset.clicked.connect(self.reset_settings)
-        buttons.addWidget(btn_reset)
         self.addLayout(buttons)
 
 
@@ -395,13 +421,12 @@ class AnalogMatrixSettings(BasicEditor):
         super().rebuild(device)
         if self.valid():
             self.keyboard = device.keyboard
-            self.recreate_gui()
+            self.reload_settings()
 
         self.container.setEnabled(self.valid())
 
 
     def recreate_gui(self):
-        #TODO: Float spinboxes aren't deleted
         for option in self.options:
             if isinstance(option, QLabel):
                 option.hide()
@@ -410,8 +435,6 @@ class AnalogMatrixSettings(BasicEditor):
                 option.delete()
         self.options.clear()
 
-        # for option in self.settings.values():
-        #TODO: Decide if I want to add QLabels to self.options or not (probably yes, how else am I going to delete them?)
         for option in self.keyboard.am_settings.values():
             if option['type'] == 'divider':
                 # Change the label style to better act as a divider
@@ -419,16 +442,12 @@ class AnalogMatrixSettings(BasicEditor):
                 opt.setMinimumHeight(28)
                 opt.setAlignment(Qt.AlignBottom)
                 self.container.addWidget(opt, self.container.rowCount(), 0)
-                # label = QLabel(f"<b>{option['title']}</b>")
-                # label.setMinimumHeight(28)
-                # label.setAlignment(Qt.AlignBottom)
-                # self.container.addWidget(label, self.container.rowCount(), 0)
-                # continue
 
             elif option['type'] == 'integer':
                 opt = AMIntegerOption(option, self.container)
                 opt.changed.connect(self.on_change)
 
+            #TODO: Currently unused, but will need to make AMBool to get the correct values
             elif option['type'] == 'boolean':
                 opt = BooleanOption(option, self.container)
                 opt.changed.connect(self.on_change)
@@ -447,12 +466,9 @@ class AnalogMatrixSettings(BasicEditor):
                 continue
             
             self.options.append(opt)
-            # opt.changed.connect(self.on_change)
         
+
     def reload_settings(self):
-        self.btn_save.setEnabled(False)
-        self.btn_undo.setEnabled(False)
-        # self.keyboard.reload_settings()
         self.recreate_gui()
 
         for option in self.options:
@@ -461,55 +477,86 @@ class AnalogMatrixSettings(BasicEditor):
             option.reload(self.keyboard)
 
         self.on_change()
+
+        self.btn_save.setEnabled(False)
+        self.btn_undo.setEnabled(False)
+        self.btn_update.setEnabled(True)
                 
 
-    #TODO: Adjust this for am stuff
     def on_change(self):
-        changed = False
-        #TODO: Get the keyboard setting state
-        qsid_values = self.prepare_settings()
-
-        for option in self.options:
-            if isinstance(option, QLabel): continue
-
-            if qsid_values[option.qsid] != self.keyboard.setting_values[option.qsid]:
-                changed = True
-                #TODO: Set the change
-                # if option.qsid == 0:
-                self.keyboard.setting_values[option.qsid] = qsid_values[option.qsid]
-
-        if changed:
-            self.btn_save.setEnabled(changed)
-            self.btn_undo.setEnabled(changed)
-
-    def prepare_settings(self):
-        HIGHEST_QSID = 20
-        values = [0 for _ in range(HIGHEST_QSID)]
-
-        #TODO: For better support for boolean values, I should just actually use the QSID
         for field in self.options:
             if isinstance(field, QLabel): continue
 
-            values[field.qsid] = field.value()
+            self.keyboard.setting_values[field.qsid] = field.value()
 
-        return values
+        self.btn_update.setEnabled(True)
+        self.btn_undo.setEnabled(True)
+
 
     # Only return valid if analog matrix is enabled on the keyboard
     def valid(self):
         return isinstance(self.device, VialKeyboard) and self.device.keyboard and self.device.keyboard.am_enabled
     
-
+    # Save the updated settings to eeprom
     def save_settings(self):
         self.btn_save.setEnabled(False)
-        pass
 
-    # def reload_settings(self):
-    #     self.btn_save.setEnabled(False)
-    #     self.btn_undo.setEnabled(False)
+        for qsid, value in enumerate(self.keyboard.setting_values):
+            self.keyboard.saved_values[qsid] = value
 
-    def reset_settings(self):
+        self.keyboard.send_save_config()
+
+    # Send the changes to the keyboard
+    def update_settings(self):
+        self.btn_update.setEnabled(False)
         self.btn_save.setEnabled(True)
-        pass
+
+        for qsid, value in enumerate(self.keyboard.setting_values):
+            if self.keyboard.saved_values[qsid] != value:
+                if qsid == 0:
+                    self.keyboard.set_default_profile(value)
+                elif qsid == 1:
+                    self.keyboard.set_profile_switch_mode(value)
+
+                elif qsid == 2:
+                    self.keyboard.set_deadzone('top_deadzone', value)
+                elif qsid == 3:
+                    self.keyboard.set_deadzone('bottom_deadzone', value)
+                elif qsid == 4:
+                    self.keyboard.set_deadzone('smoothing', value)
+                elif qsid == 5:
+                    self.keyboard.set_deadzone('top_mult', value)
+                elif qsid == 6:
+                    self.keyboard.set_deadzone('right_mult', value)
+                elif qsid == 7:
+                    self.keyboard.set_deadzone('slave_mult', value)
+
+                # Filter strengths, currently not implemented
+                elif qsid == 8:
+                    pass
+                elif qsid == 9:
+                    pass
+                elif qsid == 10:
+                    pass
+
+                elif qsid == 11:
+                    self.keyboard.set_priority_profiles(value)
+                elif qsid == 12:
+                    self.keyboard.set_priority_level(value)
+
+                elif qsid == 13:
+                    self.keyboard.set_dynamic_calibration('dc_switch_num', value)
+                elif qsid == 14:
+                    self.keyboard.set_dynamic_calibration('dc_delta', value)
+                elif qsid == 15:
+                    self.keyboard.set_dynamic_calibration('dc_factor', value)
+
+                elif qsid == 16:
+                    self.keyboard.set_deadzone('top_joystick_deadzone', value)
+                elif qsid == 17:
+                    self.keyboard.set_deadzone('bottom_joystick_deadzone', value)
+            
+
 
 #MARK: Keyboard widget
 class AMKeyboardWidget(KeyboardWidget):

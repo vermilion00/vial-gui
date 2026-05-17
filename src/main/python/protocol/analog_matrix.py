@@ -13,16 +13,15 @@ AM_SET_SWITCH_MODE = 0x05
 AM_SET_SWITCH_PRIORITY = 0x06
 AM_SET_PROFILE_LAYERS = 0x07
 AM_SET_PROFILE_CONFIG = 0x08
-AM_SET_PRIORITY_PROFILES = 0x09
-AM_SET_PRIORITY_LEVEL = 0x0A
-AM_SET_DYNAMIC_CALIBRATION = 0x0B
-AM_SET_DEADZONE = 0x0C
-AM_SET_SAVE_PROFILE_LOCK = 0x0D
-AM_SET_USED_PROFILES = 0x0E
-AM_SET_ACTIVE_PROFILE = 0x0F
-AM_SAVE_CONFIG = 0x10
-AM_CLEAR_CALIBRATION_DATA = 0x11
-AM_RESET_KEYBOARD_DATA = 0x12
+AM_SET_PRIORITY_CONFIG = 0x09
+AM_SET_DYNAMIC_CALIBRATION = 0x0A
+AM_SET_DEADZONE = 0x0B
+AM_SET_SAVE_PROFILE_LOCK = 0x0C
+AM_SET_USED_PROFILES = 0x0D
+AM_SET_ACTIVE_PROFILE = 0x0E
+AM_SAVE_CONFIG = 0x0F
+AM_CLEAR_CALIBRATION_DATA = 0x10
+AM_RESET_KEYBOARD_DATA = 0x11
 # AM_GET_KEYBOARD_DEF subtransactions
 AM_GET_DEF = 0x00
 AM_GET_PROFILE = 0x01
@@ -60,7 +59,9 @@ DEADZONE_TO_INDEX = {
     'right_mult': 4,
     'slave_mult': 5,
     'right_filter': 6, # Not implemented
-    'slave_filter': 7 # Not implemented
+    'slave_filter': 7, # Not implemented
+    'top_joystick_deadzone': 8,
+    'bottom_joystick_deadzone': 9,
 }
 
 HIGHEST_QSID = 20
@@ -84,6 +85,8 @@ class ProtocolAnalogMatrix(BaseProtocol):
         self.num_to_matrix = []
         self.am_height_mult = LOW_RES_MULT
         self.switch_value = 0
+        # Bootloader, Calibration, Clear EEPROM, Clear calibration
+        self.init_mode_num = [0, 0, 0, 0]
 
     #MARK: Get def
     # Get the size of the configuration struct and the state of all features
@@ -115,6 +118,7 @@ class ProtocolAnalogMatrix(BaseProtocol):
             'joystick': True if data[6] & 1 else False,
             'midi': True if data[6] & (1 << 1) else False,
             'split_keyboard': True if data[6] & (1 << 2) else False,
+            'init_keys': True if data[6] & (1 << 3) else False,
             'use_high_resolution': True if data[4] & (1 << 6) else False,
             'max_profiles': data[8],
             'save_profile_lock': True if data[9] & (1 << 6) else False,
@@ -141,12 +145,12 @@ class ProtocolAnalogMatrix(BaseProtocol):
         self.am_settings = {
             'profiles': {'title': 'Profiles', 'type': 'divider'},
             'default_profile': {'title': 'Default profile', 'type': 'integer', 'min': 0, 'max': self.profiles, 'width': 1, 'qsid': 0},
-            'profile_switch_mode': {'title': 'Profile switch mode', 'type': 'combo', 'options': ('Last profile', 'Default profile', 'Manual'), 'qsid': 1},
+            'profile_switch_mode': {'title': 'Profile switch mode', 'type': 'combo', 'options': ('Default profile', 'Last profile', 'Manual'), 'qsid': 1},
             'deadzone_divider': {'title': 'Deadzones', 'type': 'divider'},
             'top_deadzone': {'title': 'Top deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 2},
             'bottom_deadzone': {'title': 'Bottom deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 3},
             'smoothing': {'title': 'Smoothing', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 4},
-            'top_mult': {'title': 'Top deadzone multiplier', 'type': 'float', 'min': 0, 'max': 2.5, 'step': 0.01, 'width': 1, 'qsid': 5},
+            'top_mult': {'title': 'Top deadzone multiplier', 'type': 'float', 'min': 1.0, 'max': 3.55, 'step': 0.01, 'width': 1, 'qsid': 5},
         }
 
         # Add additional settings based on enabled features
@@ -158,23 +162,30 @@ class ProtocolAnalogMatrix(BaseProtocol):
         if self.am_config['adjustable_filter_strength']:
             self.am_settings['filter_strength'] = {'title': 'Filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 8}
             if self.am_config['split_keyboard']:
-                # self.am_settings['right_filter_strength'] = {'title': 'Right filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 8}
-                self.am_settings['slave_filter_strength'] = {'title': 'Slave filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 9}
+                # self.am_settings['right_filter_strength'] = {'title': 'Right filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 9}
+                self.am_settings['slave_filter_strength'] = {'title': 'Slave filter strength', 'type': 'integer', 'min': 0, 'max': 5, 'width': 1, 'qsid': 10}
 
         if self.am_config['priority_mode']:
             self.am_settings['prio_label'] = {'title': 'Priority', 'type': 'divider'}
             #TODO: Add prio profile buttons here
+            self.am_settings['priority_profiles'] = {'title': 'Priority profiles', 'type': 'bitmap', 'min': 0, 'max': self.profiles, 'width': 2, 'qsid': 11}
 
             if self.am_config['priority_indices']:
-                self.am_settings['priority_level'] = {'title': 'Priority level', 'type': 'integer', 'min': 0, 'max': 10, 'width': 1, 'qsid': 11}
+                self.am_settings['priority_level'] = {'title': 'Priority level', 'type': 'integer', 'min': 0, 'max': 10, 'width': 1, 'qsid': 12}
 
         if self.am_config['dynamic_calibration']:
             self.am_settings['dynamic_calibration'] = {'title': 'Dynamic Calibration', 'type': 'divider'}
-            self.am_settings['dc_switch_num'] = {'title': 'Switch amount', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 12}
-            self.am_settings['dc_delta'] = {'title': 'Delta', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 13}
-            self.am_settings['dc_factor'] = {'title': 'Factor', 'type': 'float', 'min': 0, 'max': 0.5, 'step': 0.01, 'width': 1, 'qsid': 14}
+            self.am_settings['dc_switch_num'] = {'title': 'Switch amount', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 13}
+            self.am_settings['dc_delta'] = {'title': 'Delta', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 14}
+            self.am_settings['dc_factor'] = {'title': 'Factor', 'type': 'float', 'min': 0, 'max': 0.5, 'step': 0.01, 'width': 1, 'qsid': 15}
+        
+        if self.am_config['joystick']:
+            self.am_settings['joystick'] = {'title': 'Joystick', 'type': 'divider'}
+            self.am_settings['top_joystick_deadzone'] = {'title': 'Top deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 16}
+            self.am_settings['bottom_joystick_deadzone'] = {'title': 'Bottom deadzone', 'type': 'integer', 'min': 0, 'max': 255, 'width': 1, 'qsid': 17}
 
         self.setting_values = [0 for _ in range(HIGHEST_QSID)]
+        self.saved_values = [0 for _ in range(HIGHEST_QSID)]
 
         return True
 
@@ -297,6 +308,12 @@ class ProtocolAnalogMatrix(BaseProtocol):
             parsed_len += 1
             data = full_data[parsed_len:]
 
+        if self.am_config['joystick']:
+            self.am_config['top_joystick_deadzone'] = struct.unpack('B', data[:1])[0]
+            self.am_config['bottom_joystick_deadzone'] = struct.unpack('B', data[1:2])[0]
+            parsed_len += 2
+            data = full_data[parsed_len:]
+
         parsed_len += parsed_len % 2
         data = full_data[parsed_len:]
         self.keyboard_def_size = struct.unpack('<H', data[:2])[0] # Even though this should be the end of the array, use a slice just in case it's wrong
@@ -307,9 +324,11 @@ class ProtocolAnalogMatrix(BaseProtocol):
         for key, option in self.am_settings.items():
             if option['type'] == 'divider': continue
             self.setting_values[option['qsid']] = self.am_config[key]
+            self.saved_values[option['qsid']] = self.am_config[key]
 
 
     #MARK: Get Matrix
+    #TODO: Also get mux_to_num for init keys, then just transfer the mux values to the keyboard, or send the indices and convert them on the kb?
     def get_transformation_matrices(self):
         rows = self.am_config['matrix_rows']
         cols = self.am_config['matrix_cols']
@@ -351,25 +370,6 @@ class ProtocolAnalogMatrix(BaseProtocol):
             self.switch_value = ((value - self.am_config['top_data'][index]) / (self.am_config['bottom_data'][index] - self.am_config['top_data'][index])) * 100
         else:
             self.switch_value = ((self.am_config['top_data'][index] - value) / (self.am_config['top_data'][index] - self.am_config['bottom_data'][index])) * 100
-
-
-    #TODO: I don't even need rc_matrix, since I can just look each position up in matrix_to_num and lowlight all keys that aren't in there
-    # def get_mixed_matrix(self):
-    #     rows = self.am_config['matrix_rows']
-    #     cols = self.am_config['matrix_rows']
-    #     size = rows * cols
-
-    #     pages = math.ceil(self.size / 32)
-    #     data = b''
-    #     for page in range(pages):
-    #         data += self.usb_send(self.dev, struct.pack(">BBH", AM_PREFIX, AM_GET_MATRIX_TO_NUM, page), retries=20)
-
-    #     expected_size = math.ceil(self.size / 32) * 32
-    #     if len(data) != expected_size: raise Warning("WARNING: The length of the transferred data doesn't match the expected length!")
-    #     data = data[:self.size]
-        
-    #     col_str = ''.join(['B' for _ in range(cols)])
-    #     matrix_to_rc_num = [list(struct.unpack(col_str, data[row*cols:(row+1)*cols]) for row in rows)]
 
 
     def get_active_profile(self):
@@ -439,11 +439,20 @@ class ProtocolAnalogMatrix(BaseProtocol):
     def toggle_priority_profiles(self, profile):
         self.am_config['priority_profiles'] ^= 1 << profile
         value = self.am_config['priority_profiles']
-        self.usb_send(self.dev, struct.pack('<BBH', AM_PREFIX, AM_SET_PRIORITY_PROFILES, value), retries=20)
+        index = 0
+        self.usb_send(self.dev, struct.pack('<BBBH', AM_PREFIX, AM_SET_PRIORITY_CONFIG, index, value), retries=20)
 
-    def set_priority_level(self, level):
-        self.am_config['priority_level'] = level
-        self.usb_send()
+
+    def set_priority_profiles(self, value):
+        self.am_config['priority_profiles'] = value
+        index = 0
+        self.usb_send(self.dev, struct.pack('<BBBH', AM_PREFIX, AM_SET_PRIORITY_CONFIG, index, value), retries=20)
+
+
+    def set_priority_level(self, value):
+        self.am_config['priority_level'] = value
+        index = 1
+        self.usb_send(self.dev, struct.pack('BBBB', AM_PREFIX, AM_SET_PRIORITY_CONFIG, index, value), retries=20)
 
 
     def set_dynamic_calibration(self, type, value):
@@ -496,14 +505,6 @@ class ProtocolAnalogMatrix(BaseProtocol):
             self.get_keyboard_data()
             self.get_transformation_matrices()
             self.get_calibration_data()
-
-            # self.send_reset_data()
-
-            # self.set_switch_height(1, 0, 'rt_press', 2.5)
-            # self.set_switch_height(31, 0, 'rt_press', 2.5)
-
-            # print(self.am_config['top_data'])
-            # print(self.am_config['bottom_data'])
 
 
     #TODO: Implement this later

@@ -190,15 +190,13 @@ class MainWindow(QMainWindow):
             file_menu.addSeparator()
             file_menu.addAction(exit_act)
 
-        #TODO: Add am config saving/loading here
-        #TODO: How do I only show these when enabled?
         #MARK: AM menu actions
         #TODO: Instead of adding them to the top bar, add this to the analog matrix settings tab?
-        analog_matrix_load_act = QAction(tr("Menu Analog Matrix", "Load analog matrix config..."), self)
+        analog_matrix_load_act = QAction(tr("MenuAnalogMatrix", "Load analog matrix config..."), self)
         analog_matrix_load_act.setShortcut("Ctrl+Shift+O")
         analog_matrix_load_act.triggered.connect(self.on_analog_matrix_config_load)
 
-        analog_matrix_save_act = QAction(tr("Menu Analog Matrix", "Save analog matrix config..."), self)
+        analog_matrix_save_act = QAction(tr("MenuAnalogMatrix", "Save analog matrix config..."), self)
         analog_matrix_save_act.setShortcut("Ctrl+Shift+S")
         analog_matrix_save_act.triggered.connect(self.on_analog_matrix_config_save)
 
